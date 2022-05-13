@@ -10,7 +10,7 @@ def get_config():
     config.model = mlc.ConfigDict()
     config.model.name = "CNN"
     config.model.config = {}
-
+    
     config.loss = mlc.ConfigDict()
     config.loss.name = "softmax_cross_entropy"
     config.loss.config = {}
@@ -37,5 +37,13 @@ def get_config():
         base_lr=1e-3,
         num_steps_per_epoch=config.epochs // config.dataset.batch_size
     )
+
+    config.metrics = mlc.ConfigDict()
+    config.metrics.names = ("loss", "top1_err", "top5_err")
+    
+    config.log_every = 100
+    config.save_every = 10_000
+    config.log_dir = "./logs"
+    config.save_dir = "./checkpoints"
 
     return config
