@@ -8,15 +8,6 @@ def get_config():
     config.do_train = True
     config.epochs = 10
 
-
-    config.model = mlc.ConfigDict()
-    config.model.name = "CNN"
-    config.model.config = {}
-    
-    config.loss = mlc.ConfigDict()
-    config.loss.name = "softmax_cross_entropy"
-    config.loss.config = {}
-
     config.dataset = mlc.ConfigDict()
     config.dataset.name = "mnist"
     config.dataset.image_dims = (28, 28, 1)
@@ -27,6 +18,16 @@ def get_config():
     config.dataset.num_workers = 0
     config.dataset.root = "/tmp"
     config.dataset.download = True
+
+    config.model = mlc.ConfigDict()
+    config.model.name = "CNN"
+    config.model.config = dict(
+        num_classes=config.dataset.num_classes)
+    
+    config.loss = mlc.ConfigDict()
+    config.loss.name = "softmax_cross_entropy"
+    config.loss.config = dict(
+        num_classes=config.dataset.num_classes)
 
     config.optimizer = mlc.ConfigDict()
     config.optimizer.tx_name = "scale_by_adam"
