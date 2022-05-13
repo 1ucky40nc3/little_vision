@@ -5,7 +5,9 @@ def get_config():
     """Basic config for the MNIST example."""
     config = mlc.ConfigDict()
 
+    config.do_train = True
     config.epochs = 10
+
 
     config.model = mlc.ConfigDict()
     config.model.name = "CNN"
@@ -17,6 +19,7 @@ def get_config():
 
     config.dataset = mlc.ConfigDict()
     config.dataset.name = "mnist"
+    config.dataset.image_dims = (28, 28, 1)
     config.dataset.train_size = 60_000
     config.dataset.valid_size = 10_000
     config.dataset.num_classes = 10
