@@ -1,7 +1,7 @@
 import optax
 
 
-def warmup_cosine_decay_schedule(
+def warmup_cosine(
     num_epochs: int, 
     warmup_epochs: int, 
     base_lr: float, 
