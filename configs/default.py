@@ -11,7 +11,7 @@ def get_config():
     config.model.name = "CNN"
     config.model.config = {}
 
-    config.model = mlc.ConfigDict()
+    config.loss = mlc.ConfigDict()
     config.loss.name = "softmax_cross_entropy"
     config.loss.config = {}
 
