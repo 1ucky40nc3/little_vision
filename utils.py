@@ -10,3 +10,7 @@ def shard(array: jnp.ndarray) -> jnp.array:
         array, 
         "(d n) ... -> d n ...", 
         d=jax.local_device_count())
+
+
+class Writer:
+    pass

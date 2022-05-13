@@ -2,6 +2,8 @@ from typing import Tuple
 
 from functools import partial
 
+import torch.utils.data as data
+
 import jax
 import jax.numpy as jnp
 
@@ -14,6 +16,7 @@ import models
 import optimizers
 import metrics
 import losses
+import utils
 
 
 @partial(jax.pmap, static_broadcasted_argnums=(1,))
@@ -32,7 +35,7 @@ def train_state(
 
 
 @jax.pmap
-def update_step(
+def update(
     state: TrainState,
     grads: jnp.ndarray
 ) -> TrainState:
@@ -40,7 +43,7 @@ def update_step(
 
 
 @partial(jax.pmap, axis_name="i", static_broadcasted_argnums=(3, 4))
-def train_step(
+def step(
     state: TrainState,
     images: jnp.ndarray,
     labels: jnp.ndarray,
@@ -52,7 +55,7 @@ def train_step(
         loss = getattr(losses, config.loss.name)(
             logits, labels, **config.loss.config)
         return loss, logits
-        
+
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, logits), grads = grad_fn(state.params)
 
@@ -63,8 +66,16 @@ def train_step(
     return grads, metrics
 
 
-def training(
+def train(
     config: mlc.ConfigDict
+) -> None:
+    pass
+
+
+def evaluate(
+    config: mlc.ConfigDict,
+    dataset: data.DataLoader,
+    logger: utils.Writer
 ) -> None:
     pass
     
