@@ -1,12 +1,13 @@
 import ml_collections as mlc
 
 
-def get_config():
+def get_config() -> mlc.FrozenConfigDict:
     """Basic config for the MNIST example."""
     config = mlc.ConfigDict()
 
+    config.name = "MNIST example"
     config.do_train = True
-    config.epochs = 10
+    config.num_epochs = 10
 
     config.dataset = mlc.ConfigDict()
     config.dataset.name = "mnist"
@@ -36,18 +37,19 @@ def get_config():
     config.optimizer.wd = 1e-4
     config.optimizer.schedule_name = "warmup_cosine"
     config.optimizer.schedule_config = dict(
-        num_epochs=config.epochs,
+        num_epochs=config.num_epochs,
         warmup_epochs=2,
         base_lr=1e-3,
-        num_steps_per_epoch=config.epochs // config.dataset.batch_size
+        num_steps_per_epoch=config.dataset.train_size // config.dataset.batch_size
     )
 
     config.metrics = mlc.ConfigDict()
     config.metrics.names = ("loss", "top1_err", "top5_err")
     
+    config.random_seed = 42
     config.log_every = 100
     config.save_every = 10_000
     config.log_dir = "./logs"
     config.save_dir = "./checkpoints"
 
-    return config
+    return mlc.FrozenConfigDict(config)
