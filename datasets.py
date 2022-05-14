@@ -34,9 +34,7 @@ def transform(
 
 def mnist(
     train: bool,
-    config: mlc.ConfigDict,
-    root: str = "/tmp",
-    download: bool = True
+    config: mlc.ConfigDict
 ) -> data.DataLoader:
     """Return a MNIST loader.
 
@@ -54,10 +52,10 @@ def mnist(
         tensor(0.) tensor(1.)
     """
     dataset = torchvision.datasets.MNIST(
-        root=root, 
+        root=config.dataset.root, 
         train=train, 
         transform=transform(config),
-        download=download)
+        download=config.dataset.download)
     
     loader = data.DataLoader(
         dataset=dataset,
