@@ -61,9 +61,9 @@ def mnist(
     
     loader = data.DataLoader(
         dataset=dataset,
-        batch_size=config.batch_size,
+        batch_size=config.dataset.batch_size,
         shuffle=train,
-        num_workers=config.num_workers)
+        num_workers=config.dataset.num_workers)
 
     # TODO: implement prefetching
     return loader
