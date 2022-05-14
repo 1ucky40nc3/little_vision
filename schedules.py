@@ -11,7 +11,8 @@ def warmup_cosine(
     decay_epochs = max(num_epochs - warmup_epochs, 1)
     decay_steps = decay_epochs * num_steps_per_epoch
     assert warmup_steps < decay_steps, (
-        "The number of warmup steps has to be smaller than the number of decay steps!")
+        "The number of warmup steps has to be smaller than the number of decay steps! "
+        f"The number specified ratio is {warmup_steps}/{decay_steps}.")
 
     return optax.warmup_cosine_decay_schedule(
         init_value=0.,
