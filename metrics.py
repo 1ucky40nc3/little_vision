@@ -4,15 +4,22 @@ from typing import NamedTuple
 
 from functools import partial
 
+import importlib
+
 import jax
 import jax.numpy as jnp
 
+import ml_collections as mlc
 
-def loss_metric(loss: jnp.ndarray, *args):
+
+MetricFn = Callable[[Tuple[jnp.ndarray]], jnp.ndarray]
+
+
+def loss(loss: jnp.ndarray, *args):
     return loss
 
 
-def topk_err_metric(
+def topk_err(
     loss: jnp.ndarray,
     logits: jnp.ndarray,
     labels: jnp.ndarray,
@@ -23,10 +30,5 @@ def topk_err_metric(
     v_isin = jax.vmap(jnp.isin)
     return v_isin(k_preds, labels).any(axis=-1)
 
-
-MetricFn = Callable[[Tuple[jnp.ndarray]], jnp.ndarray]
-
-class Metrics(NamedTuple):
-    loss: MetricFn = loss_metric
-    top1_err: MetricFn = partial(topk_err_metric, k=1)
-    top5_err: MetricFn = partial(topk_err_metric, k=5)
+top1_err: MetricFn = partial(topk_err, k=1)
+top5_err: MetricFn = partial(topk_err, k=5)

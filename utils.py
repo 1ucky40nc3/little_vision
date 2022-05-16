@@ -1,6 +1,8 @@
 from typing import Any
 from typing import Dict
 from typing import List
+from typing import Union
+from typing import Tuple
 from typing import Optional
 from typing import Callable
 from typing import OrderedDict
@@ -12,145 +14,102 @@ from dataclasses import dataclass
 from absl import logging
 
 import torch
+import torch.utils.data as tud
 
 import jax
 import jax.numpy as jnp
 
 import einops
 
+import ml_collections as mlc
+
 import wandb
 
+import train as little_train
+import actions as little_actions
 import metrics as little_metrics
 
 
-def shard(array: jnp.ndarray) -> jnp.array:
-    return einops.rearrange(
-        array, 
-        "(d n) ... -> d n ...", 
-        d=jax.local_device_count())
-
-
-# TODO: maybe shard with flax.jax_utils.replicate
-def jaxify(tensor: torch.Tensor) -> jnp.ndarray:
-    return shard(tensor.numpy())
-
-"""
-@dataclass
-class Action:
-    desc: str
-    fn: Callable[[Any], Any]
-    data: List[Any] = []
-
-    last: float = 0.
-    max: float = 0.
-    type: str = "step"
-
-    @property
-    def cond(self):
-        raise NotImplementedError()
-
-    def __call__(self, *args, **kwargs) -> None:
-        raise NotImplementedError()
-"""
-
-T_TYPES = ("steps", "time")
-
-@dataclass
-class Action:
-    def __init__(
-        self,
-        fn: Callable[[Any], Any],
-        kwargs: Dict[str, Any],
-        int_t: float,
-        t_type: str,
-        max_steps: float,
-        data: OrderedDict = OrderedDict(),
-        last_t: float = 0.,
-        save_data: bool = True,
-        flush_data: bool = True
-    ) -> None:
-        assert t_type in T_TYPES, (
-            f"The `t_type` has to be in {T_TYPES}! "
-            f"But {t_type} was provided!")
-
-        self.fn = fn
-        self.kwargs = kwargs
-        self.int_t = int_t
-        self.max_steps = max_steps
-        self.t_type = t_type
-        self.data = data # TODO: make data as ordered dict -> to be able to call func on local and global data
-        self.last_t = last_t
-        self.save_data = save_data
-        self.flush_data = flush_data
-
-    def __call__(
-        self,
-        step: Optional[float] = None,
-        value: Optional[Any] = None,
-        only_last: bool = True,
-        **kwargs
-    ) -> None:
-        if self.save_data:
-            self.data[step] = value 
-
-        is_time, t = self.eval(step)
-        if is_time:
-            if only_last:
-                data = value
-            else:
-                data = []
-                for value in self.data.values():
-                    data = [*data, *value]
-
-            print({**self.kwargs, **kwargs})
-            self.fn(
-                step,
-                data, 
-                **{**self.kwargs, **kwargs}
-            )
-            self.last_t = t
-
-            if self.flush_data:
-                self.data = []
-
-    def eval(self, step: float) -> bool:
-        t = self.type_t(step)
-        return (
-            t - self.last_t >= self.int_t 
-            or step == self.max_steps
-        ), t
-
-    def type_t(
-        self,
-        t: Optional[float] = None
-    ) -> float:
-        return time.time() if self.t_type == "time" else t
-
-
-def log_metrics(
-    step: float,
-    metrics: List[jnp.ndarray],
-    metric_fns: little_metrics.Metrics,
+def log(
+    update: Union[List[jnp.ndarray], List[List[jnp.ndarray]]],
+    index: int,
+    config: mlc.ConfigDict,
     desc: str = "",
     prefix: str = "",
     format: str = ": {:.4f}%s ",
     delimiter: str = ";",
-    log_in_board: bool = True
+    only_std: bool = False,
+    **kwargs
 ) -> None:
-    metrics = jnp.array(metrics).T
-    metrics = jnp.mean(metrics, axis=-1)
+    update = jnp.array(update)
+    print(update.shape)
+    #print(update)
+    if update.ndim == 1:
+        update = update[None, ...]
+    update = update.T
+    update = jnp.mean(update, axis=-1)
 
-    string = (format % delimiter).join(metric_fns._fields) + format % ""
-    logging.info(f"{desc.format(step)}{string.format(*metrics)}")
+    string = (format % delimiter).join(config.metrics.names) + format % ""
+    logging.info(f"{desc.format(index)}{string.format(*update)}")
 
-    if log_in_board:
-        dictionary = {
+    if not only_std:
+        data = {
             f"{prefix}{k}": v 
-            for k, v in zip(metric_fns._fields, metrics)}
-        print(dictionary)
-    #wandb.log(dictionary)
+            for k, v in zip(
+                config.metrics.names, 
+                update
+            )
+        }
+        #wandb.log(data)
     
 
+def log_train_action(
+    config: mlc.ConfigDict
+) -> little_actions.Action:
+    return little_actions.Action(
+        fn=log,
+        fn_kwargs=dict(
+            config=config,
+            desc="Training ({} / %d) | " % config.max_train_steps,
+            prefix="train_",
+        ),
+        interval=config.log_every,
+        interval_type=config.log_interval_type,
+        max_index=config.max_train_steps,
+        clear_upates=True
+    )
 
-class Writer:
-    pass
+
+def log_valid_action(
+    config: mlc.ConfigDict
+) -> little_actions.Action:
+    return little_actions.Action(
+        fn=log,
+        fn_kwargs=dict(
+            config=config,
+            desc="Evaluation ({} / %d) | " % config.max_valid_steps,
+            prefix="train_",
+        ),
+        interval=config.log_every,
+        interval_type=config.log_interval_type,
+        max_index=config.max_valid_steps
+    )
+
+
+def valid_action(
+    config: mlc.ConfigDict,
+    dataset: tud.DataLoader
+) -> little_actions.Action:
+    return little_actions.Action(
+        fn=little_train.evaluate,
+        fn_kwargs=dict(
+            dataset=dataset,
+            config=config,
+            actions=(log_valid_action(config),)
+        ),
+        interval=config.eval_every,
+        interval_type=config.eval_interval_type,
+        max_index=config.max_train_steps,
+        use_latest=True,
+        save_updates=False,
+    )
