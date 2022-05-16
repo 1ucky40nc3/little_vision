@@ -1,9 +1,15 @@
+from typing import Any
+from typing import List
 from typing import Tuple
+from typing import Union
+from typing import Callable
+from typing import NamedTuple
 
 import time
 
 from functools import partial
 
+from dataclasses import dataclass
 
 from absl import app
 from absl import flags
@@ -20,12 +26,26 @@ from flax import jax_utils as jutils
 
 import ml_collections as mlc
 
+import wandb
+
 import models as little_models
 import optimizers as little_optimizers
 import metrics as little_metrics
 import losses as little_losses
 import utils as little_utils
 import datasets as little_datasets
+
+
+"""class Action(NamedTuple):
+    description: str
+    fn: Callable[[Any], Any]
+    trigger: Callable[[Union[TrainState, Any]], Any]
+    data: List[Any]
+"""
+
+
+
+
 
 
 # TODO: implement for cpu and later shard
@@ -92,24 +112,55 @@ def train(
 
     metric_fns = little_metrics.Metrics()
 
-    for epoch in range(config.num_epochs):
-        epoch_metrics = []
-        t = time.time()
+    train_metrics = little_utils.Action(
+        fn=little_utils.log_metrics,
+        kwargs=dict(
+            metric_fns=metric_fns,
+            desc="Training ({} / %d) | " % config.max_train_steps,
+            prefix="train_",
+        ),
+        int_t=config.log_every,
+        t_type=config.log_t_type,
+        max_steps=config.max_train_steps
+    )
+    print({**config})
 
-        for batch in train_ds:
+    evaluate_ = little_utils.Action(
+        fn=evaluate,
+        kwargs=dict(
+            dataset=test_ds,
+            config=dict(config=config),
+            metric_fns=metric_fns,
+        ),
+        int_t=config.eval_every,
+        t_type=config.eval_t_type,
+        max_steps=config.max_valid_steps,
+        save_data=False
+    )
+
+    for i in range(config.num_epochs):
+        for j, batch in enumerate(train_ds):
             images, labels = jax.tree_map(little_utils.jaxify, batch)
 
             grads, metrics = train_step(state, images, labels, metric_fns, config)
             state = update(state, grads)
 
             metrics = jutils.unreplicate(metrics)
-            epoch_metrics.append(metrics)
 
-        epoch_metrics = jnp.array(epoch_metrics).T
-        epoch_metrics = jnp.mean(epoch_metrics, axis=-1)
-        epoch_string = ": {:.4f}; ".join([name for name in metric_fns._fields]) + ": {:.4f}"
-        logging.info(f"Epoch: {epoch + 1}/{config.num_epochs} ~ {time.time() - t:.3f}s | "
-                     f"{epoch_string.format(*epoch_metrics)}")
+            step = i * config.num_steps_per_epoch + j
+            
+            train_metrics(step, metrics)
+            evaluate_(step, state)
+
+
+
+        #eval_metrics = evaluate(state, test_ds, config, metric_fns)
+
+        #metrics_string = ": {:.4f}; ".join([name for name in metric_fns._fields]) + ": {:.4f}"
+        """
+        logging.info(f"Epoch: {i + 1}/{config.num_epochs} ~ {time.time() - t:.3f}s | "
+                     f"{metrics_string.format(*epoch_metrics)} / {metrics_string.format(*eval_metrics)}")
+        """
 
 
 @partial(jax.pmap, axis_name="i", static_broadcasted_argnums=(3, 4))
@@ -129,21 +180,49 @@ def eval_step(
     loss, logits = loss_fn(state.params)
 
     metrics = [fn(loss, logits, labels) for fn in metric_fns]
-    grads, metrics = jax.lax.pmean((grads, metrics), axis_name="i")
+    metrics = jax.lax.pmean(metrics, axis_name="i")
     metrics = jax.tree_map(jnp.mean, metrics)
 
     return metrics
 
 
 def evaluate(
-    config: mlc.ConfigDict,
+    state: TrainState,
     dataset: data.DataLoader,
-    logger: little_utils.Writer
+    config: mlc.ConfigDict,
+    metric_fns: little_metrics.Metrics
 ) -> None:
-    pass
+    eval_metrics = little_utils.Action(
+        fn=little_utils.log_metrics,
+        kwargs=dict(
+            metric_fns=metric_fns,
+            desc="Evaluation ({} / %d) | " % config.max_valid_steps,
+            prefix="train_",
+        ),
+        int_t=config.log_every,
+        t_type=config.log_t_type,
+        max_steps=config.max_valid_steps,
+        flush_data=False
+    )
+
+    for i, batch in enumerate(dataset):
+        images, labels = jax.tree_map(little_utils.jaxify, batch)
+
+        metrics = eval_step(state, images, labels, metric_fns, config)
+        metrics = jutils.unreplicate(metrics)
+        #eval_metrics.append(metrics)
+        eval_metrics(i, metrics, only_last=True, log_in_board=False)
+    eval_metrics(i + 1, metrics)
+
+    #eval_metrics = jnp.array(eval_metrics).T
+    #eval_metrics = jnp.mean(eval_metrics, axis=-1)
+
+    #return eval_metrics
+
     
 
 def main(_):
+    #wandb.init()
     from configs import default
     train(default.get_config())
 

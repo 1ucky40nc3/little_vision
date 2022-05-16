@@ -5,9 +5,9 @@ def get_config() -> mlc.FrozenConfigDict:
     """Basic config for the MNIST example."""
     config = mlc.ConfigDict()
 
+    config.project = "little_vision"
     config.name = "MNIST example"
     config.do_train = True
-    config.num_epochs = 10
 
     config.dataset = mlc.ConfigDict()
     config.dataset.name = "mnist"
@@ -19,6 +19,11 @@ def get_config() -> mlc.FrozenConfigDict:
     config.dataset.num_workers = 0
     config.dataset.root = "/tmp"
     config.dataset.download = True
+
+    config.num_epochs = 10
+    config.num_steps_per_epoch = config.dataset.train_size // config.dataset.batch_size
+    config.max_train_steps = config.num_steps_per_epoch * config.num_epochs
+    config.max_valid_steps = config.dataset.valid_size // config.dataset.batch_size
 
     config.model = mlc.ConfigDict()
     config.model.name = "CNN"
@@ -40,7 +45,7 @@ def get_config() -> mlc.FrozenConfigDict:
         num_epochs=config.num_epochs,
         warmup_epochs=2,
         base_lr=1e-3,
-        num_steps_per_epoch=config.dataset.train_size // config.dataset.batch_size
+        num_steps_per_epoch=config.num_steps_per_epoch
     )
 
     config.metrics = mlc.ConfigDict()
@@ -48,7 +53,11 @@ def get_config() -> mlc.FrozenConfigDict:
     
     config.random_seed = 42
     config.log_every = 100
+    config.eval_every = 100
     config.save_every = 10_000
+    config.log_t_type = "steps"
+    config.eval_t_type = "steps"
+    config.save_t_type = "steps"
     config.log_dir = "./logs"
     config.save_dir = "./checkpoints"
 
