@@ -1,13 +1,5 @@
-from typing import Any
-from typing import Dict
 from typing import List
 from typing import Union
-from typing import Tuple
-from typing import Optional
-from typing import Callable
-from typing import OrderedDict
-
-import time
 
 from dataclasses import dataclass
 
@@ -19,15 +11,12 @@ import torch.utils.data as tud
 import jax
 import jax.numpy as jnp
 
-import einops
-
 import ml_collections as mlc
 
 import wandb
 
 import train as little_train
 import actions as little_actions
-import metrics as little_metrics
 
 
 def log(
@@ -60,6 +49,7 @@ def log(
                 update
             )
         }
+        # TODO: add step to log (global step for logging)
         #wandb.log(data)
     
 

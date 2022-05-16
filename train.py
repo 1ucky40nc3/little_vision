@@ -139,7 +139,6 @@ def train(
     key = jax.random.PRNGKey(config.random_seed)
     key, subkey = jax.random.split(key)
 
-
     subkeys = jax.random.split(subkey, num_devices)
     state = train_state(subkeys, config)
 
@@ -150,7 +149,6 @@ def train(
             images, labels = jax.tree_map(jaxify, batch)
 
             state, metrics = train_step(state, images, labels, metric_fns, config)
-            
             metrics = jax_utils.unreplicate(metrics)
 
             index = i * config.num_steps_per_epoch + j
