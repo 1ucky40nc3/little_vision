@@ -72,14 +72,6 @@ def train_state(
     return TrainState.create(apply_fn=model.apply, params=params, tx=tx)
 
 
-@jax.pmap
-def update(
-    state: TrainState,
-    grads: jnp.ndarray
-) -> TrainState:
-    return 
-
-
 @partial(
     jax.pmap, 
     axis_name="i", 
@@ -130,7 +122,7 @@ def eval_step(
 
     loss, logits = loss_fn(state.params)
     metrics = [fn(loss, logits, labels) for fn in metric_fns]
-    
+
     metrics = jax.lax.pmean(metrics, axis_name="i")
     metrics = jax.tree_map(jnp.mean, metrics)
 
