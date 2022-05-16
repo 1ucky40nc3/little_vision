@@ -19,7 +19,7 @@ def loss(loss: jnp.ndarray, *args):
     return loss
 
 
-def topk_err(
+def topk_acc(
     loss: jnp.ndarray,
     logits: jnp.ndarray,
     labels: jnp.ndarray,
@@ -30,5 +30,5 @@ def topk_err(
     v_isin = jax.vmap(jnp.isin)
     return v_isin(k_preds, labels).any(axis=-1)
 
-top1_err: MetricFn = partial(topk_err, k=1)
-top5_err: MetricFn = partial(topk_err, k=5)
+top1_acc: MetricFn = partial(topk_acc, k=1)
+top5_acc: MetricFn = partial(topk_acc, k=5)

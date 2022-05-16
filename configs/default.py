@@ -49,7 +49,7 @@ def get_config() -> mlc.FrozenConfigDict:
     )
 
     config.metrics = mlc.ConfigDict()
-    config.metrics.names = ("loss", "top1_err", "top5_err")
+    config.metrics.names = ("loss", "top1_acc", "top5_acc")
     
     config.random_seed = 42
     config.log_every = 100
