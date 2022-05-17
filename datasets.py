@@ -3,7 +3,7 @@ from typing import List
 from functools import partial
 
 import torch
-import torch.utils.data as data
+import torch.utils.data as tud
 
 import torchvision
 import torchvision.transforms as transforms
@@ -35,7 +35,7 @@ def transform(
 def mnist(
     train: bool,
     config: mlc.ConfigDict
-) -> data.DataLoader:
+) -> tud.DataLoader:
     """Return a MNIST loader.
 
     Example:
@@ -57,7 +57,7 @@ def mnist(
         transform=transform(config),
         download=config.dataset.download)
     
-    loader = data.DataLoader(
+    loader = tud.DataLoader(
         dataset=dataset,
         batch_size=config.dataset.batch_size,
         shuffle=train,
@@ -65,5 +65,4 @@ def mnist(
 
     # TODO: implement prefetching
     return loader
-
 
