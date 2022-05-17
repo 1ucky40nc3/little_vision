@@ -24,17 +24,25 @@ import datasets as little_datasets
 
 
 def do_logging(step: int, config: mlc.ConfigDict, host: int = 0) -> bool:
-    return jax.process_index() == host and step > 0 and step == config.log_every
+    return jax.process_index() == host and step > 0 and step % config.log_every == 0
 
 def do_eval(step: int, config: mlc.ConfigDict) -> bool:
-    return step > 0 and step in (config.eval_every, config.max_train_steps)
+    return step > 0 and (step % config.eval_every == 0 or step == config.max_train_steps)
 
 def do_checkpoint(step: int, config: mlc.ConfigDict, host: int = 0) -> bool:
-    return jax.process_index() == host and step > 0 and step == config.save_every
-    
+    return jax.process_index() == host and step > 0 and step % config.log_every == 0
+
+
+def jaxify(tensor: torch.Tensor, config: mlc.ConfigDict) -> jnp.ndarray:
+    return jax_utils.prefetch_to_device(tensor.numpy(), config.prefetch_size)
+
+
+def load_ds(train: bool, config: mlc.ConfigDict) -> tud.DataLoader:
+    return getattr(little_datasets, config.dataset.name)(train=train, config=config)
+
 
 # TODO: implement for cpu and later shard
-@partial(jax.pmap, static_broadcasted_argnums=(1,))
+@partial(jax.jit, static_argnums=(1,), backend="cpu")
 def train_state(
     rng: jnp.ndarray, 
     config: mlc.ConfigDict
@@ -47,6 +55,54 @@ def train_state(
     tx = little_optimizers.tx(config.optimizer)
 
     return TrainState.create(apply_fn=model.apply, params=params, tx=tx)
+
+
+@partial(
+    jax.pmap, 
+    axis_name="i", 
+    static_broadcasted_argnums=(3,)
+)
+def eval_step(
+    state: TrainState,
+    images: jnp.ndarray,
+    labels: jnp.ndarray,
+    config: mlc.ConfigDict
+) -> Tuple[jnp.ndarray, Tuple[jnp.ndarray]]:
+    def loss_fn(params):
+        logits = state.apply_fn({"params": params}, images)
+        loss = getattr(little_losses, config.loss.name)(
+            logits, labels, **config.loss.config)
+        return loss, logits
+
+    loss, logits = loss_fn(state.params)
+    top1 = little_metrics.top1_acc(logits, labels)
+    top5 = little_metrics.top5_acc(logits, labels)
+
+    metrics = jax.lax.pmean((loss, top1, top5), axis_name="i")
+    metrics = jax.tree_map(jnp.mean, metrics)
+
+    return metrics
+
+
+def evaluate(
+    state: TrainState,
+    dataset: tud.DataLoader,
+    config: mlc.ConfigDict,
+    **kwargs
+) -> None:
+    metrics = jnp.zeros((3,))
+    for step, batch in enumerate(dataset):
+        images, labels = jax.tree_map(jaxify, batch)
+
+        bmetrics = eval_step(state, images, labels, config)
+        bmetrics = jax_utils.unreplicate(bmetrics)
+        metrics += jnp.array(bmetrics)
+
+        if step and step % config.log_every == 0:
+            loss, top1, top5 = metrics / step
+            print(f"Eval sub {step}, {loss:.4f}, {top1:.4f}, {top5:.4f}")
+
+    return metrics
 
 
 @partial(
@@ -80,60 +136,6 @@ def train_step(
     return state, metrics
 
 
-@partial(
-    jax.pmap, 
-    axis_name="i", 
-    static_broadcasted_argnums=(3,)
-)
-def eval_step(
-    state: TrainState,
-    images: jnp.ndarray,
-    labels: jnp.ndarray,
-    config: mlc.ConfigDict
-) -> Tuple[jnp.ndarray, Tuple[jnp.ndarray]]:
-    def loss_fn(params):
-        logits = state.apply_fn({"params": params}, images)
-        loss = getattr(little_losses, config.loss.name)(
-            logits, labels, **config.loss.config)
-        return loss, logits
-
-    loss, logits = loss_fn(state.params)
-    top1 = little_metrics.top1_acc(logits, labels)
-    top5 = little_metrics.top5_acc(logits, labels)
-
-    metrics = jax.lax.pmean((loss, top1, top5), axis_name="i")
-    metrics = jax.tree_map(jnp.mean, metrics)
-
-    return metrics
-
-
-def jaxify(tensor: torch.Tensor) -> jnp.ndarray:
-    return jax_utils.replicate(tensor.numpy())
-
-def evaluate(
-    state: TrainState,
-    dataset: tud.DataLoader,
-    config: mlc.ConfigDict,
-    **kwargs
-) -> None:
-    metrics = jnp.zeros((3,))
-    for step, batch in enumerate(dataset):
-        images, labels = jax.tree_map(jaxify, batch)
-
-        bmetrics = eval_step(state, images, labels, config)
-        bmetrics = jax_utils.unreplicate(bmetrics)
-        metrics += jnp.array(bmetrics)
-
-        if step and step % config.log_every == 0:
-            loss, top1, top5 = metrics / step
-            print(f"Eval sub {step}, {loss:.4f}, {top1:.4f}, {top5:.4f}")
-
-    return metrics
-
-
-
-
-
 def train(
     config: mlc.ConfigDict,
     **kwargs
@@ -142,18 +144,23 @@ def train(
     key = jax.random.PRNGKey(config.random_seed)
     key, subkey = jax.random.split(key)
 
-    subkeys = jax.random.split(subkey, num_devices)
-    state = train_state(subkeys, config)
-    start_step = jax_utils.unreplicate(state.step)
+    #subkeys = jax.random.split(subkey, num_devices)
+    state = train_state(subkey, config)
+    # TODO: implement resuming from checkpoint
+    start_step = state.step
+    state = jax.tree_map(jax_utils.replicate, state)
 
-    train_ds = getattr(little_datasets, config.dataset.name)(train=True, config=config)
-    valid_ds = getattr(little_datasets, config.dataset.name)(train=False, config=config)
+    train_ds = load_ds(train=True, config=config)
+    valid_ds = load_ds(train=False, config=config)
+
+    print("i", jax.process_index())
 
     tmetrics = jnp.zeros((3,))
     for step, batch in zip(
         range(start_step, config.max_train_steps), 
-        cycle(train_ds)):
-        images, labels = jax.tree_map(jaxify, batch) # TODO try to jit
+        little_datasets.prepare(train_ds, config)):
+        #images, labels = jax.tree_map(jaxify, batch) # TODO try to jit
+        images, labels = batch
 
         state, metrics = train_step(state, images, labels, config)
         metrics = jax_utils.unreplicate(metrics)

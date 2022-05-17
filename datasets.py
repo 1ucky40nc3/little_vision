@@ -1,12 +1,20 @@
 from typing import List
+from typing import Iterator
 
 from functools import partial
+
+from itertools import cycle
 
 import torch
 import torch.utils.data as tud
 
 import torchvision
 import torchvision.transforms as transforms
+
+import jax
+import jax.numpy as jnp
+
+from flax import jax_utils
 
 import ml_collections as mlc
 
@@ -61,8 +69,34 @@ def mnist(
         dataset=dataset,
         batch_size=config.dataset.batch_size,
         shuffle=train,
-        num_workers=config.dataset.num_workers)
+        num_workers=config.dataset.num_workers,
+        drop_last=train)
 
     # TODO: implement prefetching
     return loader
 
+
+def shard(array: jnp.ndarray):
+  return einops.rearrange(
+      array, 
+      "(d n) ... -> d n ...", 
+      d=jax.local_device_count())
+
+
+def prepare(
+    loader: tud.DataLoader, 
+    config: mlc.ConfigDict
+) -> Iterator:
+    iterator = cycle(loader)
+    iterator = (
+        jax.tree_map(
+            lambda t: t.numpy(), b
+        ) for b in iterator)
+    iterator = (
+        jax.tree_map(
+            shard, b
+        ) for b in iterator)
+    iterator = jax_utils.prefetch_to_device(
+        iterator, config.dataset.prefetch_size)
+
+    return iterator

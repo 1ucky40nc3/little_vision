@@ -19,6 +19,7 @@ def get_config() -> mlc.FrozenConfigDict:
     config.dataset.num_workers = 0
     config.dataset.root = "/tmp"
     config.dataset.download = True
+    config.dataset.prefetch_size = 4
 
     config.num_epochs = 10
     config.num_steps_per_epoch = config.dataset.train_size // config.dataset.batch_size
