@@ -52,7 +52,7 @@ def get_config() -> mlc.FrozenConfigDict:
     config.metrics.names = ("loss", "top1_acc", "top5_acc")
     
     config.random_seed = 42
-    config.log_every = 100
+    config.log_every = 10
     config.eval_every = config.num_steps_per_epoch
     config.save_every = 10_000
     config.log_interval_type = "steps"

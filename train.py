@@ -1,19 +1,10 @@
-from typing import Any
-from typing import List
 from typing import Tuple
-from typing import Union
-from typing import Callable
-from typing import NamedTuple
+from typing import Optional
 
-import time
 
 from functools import partial
 
 from dataclasses import dataclass
-
-from absl import app
-from absl import flags
-from absl import logging
 
 import torch
 import torch.utils.data as tud
@@ -28,8 +19,6 @@ from flax import struct
 from flax import jax_utils
 from flax.optim import dynamic_scale
 from flax.training.train_state import TrainState
-
-import optax
 
 import ml_collections as mlc
 
@@ -144,17 +133,18 @@ def train(
 
     metric_fns = collect_metrics(config)
 
+    num = config.num_steps_per_epoch
     for i in range(config.num_epochs):
         for j, batch in enumerate(dataset):
             images, labels = jax.tree_map(jaxify, batch)
 
             state, metrics = train_step(state, images, labels, metric_fns, config)
-            metrics = jax_utils.unreplicate(metrics)
+            metrics, step = jax.tree_map(jax_utils.unreplicate, (metrics, state.step))
 
-            index = i * config.num_steps_per_epoch + j
             for action in actions:
                 action(
-                    index=index, 
+                    step=step,
+                    index=i*num + j,
                     update=metrics, 
                     state=state)
 
@@ -166,20 +156,25 @@ def evaluate(
     actions: Tuple[little_actions.Action],
     **kwargs
 ) -> None:
+    step = jax_utils.unreplicate(state.step)
     metric_fns = collect_metrics(config)
+    print("WOWOWOWOWO")
 
     for index, batch in enumerate(dataset):
-        images, labels = jax.tree_map(jaxify, batch)
+        #images, labels = jax.tree_map(jaxify, batch)
+        imags, labels = batch
 
         metrics = eval_step(state, images, labels, metric_fns, config)
         metrics = jax_utils.unreplicate(metrics)
         
+        print("index", index)
         for action in actions:
             last_batch = index == config.max_valid_steps
             action(
-                index=index, 
+                step=step,
+                index=index,
                 update=metrics, 
-                state=state, 
                 only_std=not last_batch, 
-                clear_updates=last_batch,
+                clear_buffer=last_batch,
                 reset_index=last_batch)
+            # TODO: put global index into action for (wandb logging)

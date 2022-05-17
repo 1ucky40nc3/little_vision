@@ -1,8 +1,7 @@
 from typing import Any
-from typing import Tuple
+from typing import List
 from typing import Callable
 from typing import Optional
-from typing import OrderedDict
 
 import time
 
@@ -19,12 +18,12 @@ class Action:
         self,
         fn: Callable,
         fn_kwargs: dict,
+        max_index: int,
         interval: float,
         interval_type: str,
-        max_index: float,
-        last_index: float = 0.,
+        counter: int = 1,
         last_time: Optional[float] = None,
-        updates: OrderedDict = OrderedDict(),
+        buffer: List[Any] = [],
         use_latest: bool = False,
         save_updates: bool = True,
         clear_upates: bool = False
@@ -35,15 +34,15 @@ class Action:
         
         self.fn = fn
         self.fn_kwargs = fn_kwargs
+        self.max_index = max_index
+        self.counter = counter
         self.interval = interval
         self.interval_type = interval_type
-        self.max_index = max_index
-        self.last_index = last_index
         self.last_time = last_time or time.time()
-        self.updates = updates
+        self.buffer = buffer
         self.use_latest = use_latest
         self.save_updates = save_updates
-        self.clear_updates = clear_upates
+        self.clear_buffer = clear_upates
 
     def __call__(
         self, 
@@ -51,26 +50,33 @@ class Action:
         update: Optional[Any] = None,
         use_latest: Optional[bool] = None,
         save_updates: Optional[bool] = None,
-        clear_updates: Optional[bool] = None,
-        reset_index: Optional[bool] = False,
+        clear_buffer: Optional[bool] = None,
         **kwargs
     ) -> None:
-        now = time.time()
-        self.updates[index] = update
+        use_latest = set(use_latest, self.use_latest)
+        save_updates = set(save_updates, self.save_updates)
+        clear_buffer = set(clear_buffer, self.clear_buffer)
 
+        print(self)
+
+        if save_updates:
+            self.buffer.append(update)
+
+        now = time.time()
         if self.do_call(index, now):
-            if use_latest is None:
-                use_latest = self.use_latest
             if not use_latest:
-                update = list(self.updates.values())
-            
-            eta = (now - self.last_time) * (
-                self.max_index - index)
+                update = self.buffer
+
+            print("counter", self.counter)
+            print({
+                    **self.fn_kwargs,
+                    **kwargs
+                })
 
             self.fn(
                 update=update,
                 index=index,
-                eta=eta,
+                counter=self.counter,
                 **{
                     **self.fn_kwargs,
                     **kwargs
@@ -79,23 +85,16 @@ class Action:
 
             self.last_index = index
             self.last_time = now
-
-            clear_updates = set(
-                clear_updates, 
-                self.clear_updates)
-            if clear_updates:
-                self.updates = OrderedDict()
-            if reset_index:
-                self.last_index = 0.
-
-        save_updates = set(
-            save_updates, 
-            self.save_updates)
-        if not save_updates:
-            self.updates = OrderedDict()
+            
+            if clear_buffer:
+                self.buffer = []
+            
+            self.counter = 0
+        self.counter += 1
 
     def do_call(self, index: int, now: float) -> bool:
-        curr = now if self.interval_type == "time" else index
-        last = self.last_time if self.interval_type == "time" else self.last_index
-
-        return curr - last >= self.interval or index == self.max_index
+        max_reached = index == self.max_index
+        
+        if self.interval_type == "time":
+            return not (now - self.last_time < self.interval) or max_reached
+        return not (self.counter < self.interval) or max_reached 

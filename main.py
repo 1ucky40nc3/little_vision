@@ -2,6 +2,8 @@ from absl import app
 from absl import flags
 from absl import logging
 
+import wandb
+
 
 import train as little_train
 import utils as little_utils
@@ -9,9 +11,11 @@ import datasets as little_datasets
 
 
 def main(_):
-    #wandb.init()
     from configs import default
     config = default.get_config()
+    logging.info(config)
+
+    #wandb.init(project=config.project)
 
     ds_cls = getattr(little_datasets, config.dataset.name)
     train_ds = ds_cls(train=True, config=config)
