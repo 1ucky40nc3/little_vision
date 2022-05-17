@@ -91,8 +91,8 @@ def evaluate(
     **kwargs
 ) -> None:
     metrics = jnp.zeros((3,))
-    for step, batch in enumerate(dataset):
-        images, labels = jax.tree_map(jaxify, batch)
+    for step, (images, labels) in enumerate(
+        little_datasets.prepare(dataset, config)):
 
         bmetrics = eval_step(state, images, labels, config)
         bmetrics = jax_utils.unreplicate(bmetrics)
@@ -140,11 +140,9 @@ def train(
     config: mlc.ConfigDict,
     **kwargs
 ) -> None:
-    num_devices = jax.local_device_count()
     key = jax.random.PRNGKey(config.random_seed)
     key, subkey = jax.random.split(key)
 
-    #subkeys = jax.random.split(subkey, num_devices)
     state = train_state(subkey, config)
     # TODO: implement resuming from checkpoint
     start_step = state.step
@@ -156,11 +154,9 @@ def train(
     print("i", jax.process_index())
 
     tmetrics = jnp.zeros((3,))
-    for step, batch in zip(
+    for step, (images, labels) in zip(
         range(start_step, config.max_train_steps), 
         little_datasets.prepare(train_ds, config)):
-        #images, labels = jax.tree_map(jaxify, batch) # TODO try to jit
-        images, labels = batch
 
         state, metrics = train_step(state, images, labels, config)
         metrics = jax_utils.unreplicate(metrics)
