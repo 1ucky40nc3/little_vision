@@ -43,28 +43,39 @@ CONFIG_FLAG = config_flags.DEFINE_config_file(
     'config', default="configs/default.py")
 
 
-def do_logging(step: int, config: ConfigDict, host: int = 0) -> bool:
+def do_logging(
+    step: int, 
+    config: ConfigDict, 
+    host: int = 0
+) -> bool:
     return (
         jax.process_index() == host 
         and step > 0 
         and step % config.log_every == 0
     )
 
-def do_eval(step: int, config: ConfigDict) -> bool:
+def do_eval(
+    step: int, 
+    config: ConfigDict
+) -> bool:
     return (
         step > 0 
         and (
-            (step - 1) % config.eval_every == 0 
+            step % config.eval_every == 0 
             or step == config.max_train_steps - 1
         )
     )
 
-def do_save(step: int, config: ConfigDict, host: int = 0) -> bool:
+def do_save(
+    step: int, 
+    config: ConfigDict, 
+    host: int = 0
+) -> bool:
     return (
         jax.process_index() == host 
         and step > 0 
         and (
-            step % config.save_every == 0
+            (step + 1) % config.save_every == 0
             or step == config.max_train_steps - 1
         )
     )
@@ -89,18 +100,14 @@ def load_ds(
 
 
 def log(
+    step: int,
     data: Dict[str, Any], 
     desc: str, 
     prefix: str, 
     only_std: bool = False
 ) -> None:
-    data_str = []
-    for k, v in data.items():
-        if isinstance(v, int):
-            data_str.append(f"{k}: {v}")
-        else:
-            data_str.append(f"{k}: {v:.4f}")
-    data_str =  "; ".join(data_str)
+    data_str = [f"{k}: {v:.5f}" for k, v in data.items()]
+    data_str =  "; ".join((f"step: {step:7d}", *data_str))
     logging.info(f"{desc}{data_str}")
 
     if not only_std:
@@ -108,7 +115,7 @@ def log(
             f"{prefix}{k}": v
             for k, v in data.items()
         }
-        wandb.log(data)
+        wandb.log(data, step=step)
 
 
 def save(
@@ -193,8 +200,8 @@ def evaluate(
 
         if step and step % config.log_every == 0:
             loss, top1, top5 = metrics / (step + 1)
-            data = dict(step=step, loss=loss, top1=top1, top5=top5)
-            log(data, "Valid | ", prefix="valid_", only_std=True)
+            data = dict(loss=loss, top1=top1, top5=top5)
+            log(step, data, "Valid | ", prefix="valid_", only_std=True)
 
     return metrics
 
@@ -264,16 +271,16 @@ def train(
         if do_logging(step, config):
             tmetrics /= counter
             loss, top1, top5 = tmetrics
-            data = dict(step=step, loss=loss, top1=top1, top5=top5)
-            log(data, "Train | ", "train_")
+            data = dict(loss=loss, top1=top1, top5=top5)
+            log(step, data, "Train | ", "train_")
             tmetrics, counter = jnp.zeros((3,)), 0
 
         if do_eval(step, config):
             vmetrics = evaluate(state, valid_ds, config)
             vmetrics /= config.max_valid_steps + 1
             loss, top1, top5 = vmetrics
-            data = dict(step=step, loss=loss, top1=top1, top5=top5)
-            log(data, "Valid | ", "valid_")
+            data = dict(loss=loss, top1=top1, top5=top5)
+            log(step, data, "Valid | ", "valid_")
 
         if do_save(step, config):
             pool.apply_async(save, (state, config))
