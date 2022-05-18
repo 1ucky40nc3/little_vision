@@ -1,8 +1,15 @@
+from typing import Any
+from typing import Dict
 from typing import Tuple
-from typing import Callable
+from typing import Iterator
 
 from functools import partial
 from itertools import cycle
+
+from absl import app
+from absl import logging
+
+import wandb
 
 import torch
 import torch.utils.data as tud
@@ -27,7 +34,7 @@ def do_logging(step: int, config: mlc.ConfigDict, host: int = 0) -> bool:
     return jax.process_index() == host and step > 0 and step % config.log_every == 0
 
 def do_eval(step: int, config: mlc.ConfigDict) -> bool:
-    return step > 0 and (step % config.eval_every == 0 or step == config.max_train_steps)
+    return step > 0 and (step % config.eval_every == 0 or step == config.max_train_steps - 1)
 
 def do_checkpoint(step: int, config: mlc.ConfigDict, host: int = 0) -> bool:
     return jax.process_index() == host and step > 0 and step % config.log_every == 0
@@ -39,6 +46,29 @@ def jaxify(tensor: torch.Tensor, config: mlc.ConfigDict) -> jnp.ndarray:
 
 def load_ds(train: bool, config: mlc.ConfigDict) -> tud.DataLoader:
     return getattr(little_datasets, config.dataset.name)(train=train, config=config)
+
+
+def log(
+    data: Dict[str, Any], 
+    desc: str, 
+    prefix: str, 
+    only_std: bool = False
+) -> None:
+    data_str = []
+    for k, v in data.items():
+        if isinstance(v, int):
+            data_str.append(f"{k}: {v}")
+        else:
+            data_str.append(f"{k}: {v:.4f}")
+    data_str =  "; ".join(data_str)
+    logging.info(f"{desc}{data_str}")
+
+    if not only_std:
+        data = {
+            f"{prefix}{k}": v
+            for k, v in data.items()
+        }
+        #wandb.log(data)
 
 
 # TODO: implement for cpu and later shard
@@ -86,7 +116,7 @@ def eval_step(
 
 def evaluate(
     state: TrainState,
-    dataset: tud.DataLoader,
+    dataset: Iterator,
     config: mlc.ConfigDict,
     **kwargs
 ) -> None:
@@ -96,11 +126,12 @@ def evaluate(
 
         bmetrics = eval_step(state, images, labels, config)
         bmetrics = jax_utils.unreplicate(bmetrics)
-        metrics += jnp.array(bmetrics)
+        metrics += jnp.array(bmetrics, dtype=jnp.float32)
 
         if step and step % config.log_every == 0:
-            loss, top1, top5 = metrics / step
-            print(f"Eval sub {step}, {loss:.4f}, {top1:.4f}, {top5:.4f}")
+            loss, top1, top5 = metrics / (step + 1)
+            data = dict(step=step, loss=loss, top1=top1, top5=top5)
+            log(data, "Valid | ", prefix="valid", only_std=True)
 
     return metrics
 
@@ -151,32 +182,39 @@ def train(
     train_ds = load_ds(train=True, config=config)
     valid_ds = load_ds(train=False, config=config)
 
-    print("i", jax.process_index())
-
-    tmetrics = jnp.zeros((3,))
+    tmetrics, counter = jnp.zeros((3,)), 0
     for step, (images, labels) in zip(
         range(start_step, config.max_train_steps), 
         little_datasets.prepare(train_ds, config)):
 
         state, metrics = train_step(state, images, labels, config)
         metrics = jax_utils.unreplicate(metrics)
-        tmetrics += jnp.array(metrics)
+        tmetrics += jnp.array(metrics, dtype=jnp.float32)
+        counter += 1
 
         if do_logging(step, config):
-            tmetrics /= config.log_every
+            tmetrics /= counter
             loss, top1, top5 = tmetrics
-            print(f"Train {step}, {loss:.4f}, {top1:.4f}, {top5:.4f}")
-            tmetrics = jnp.zeros((3,))
+            data = dict(step=step, loss=loss, top1=top1, top5=top5)
+            log(data, "Train | ", prefix="train")
+            tmetrics, counter = jnp.zeros((3,)), 0
 
         if do_eval(step, config):
             vmetrics = evaluate(state, valid_ds, config)
-            vmetrics /= config.max_valid_steps
+            print("max", config.max_valid_steps)
+            vmetrics /= config.max_valid_steps + 1
             loss, top1, top5 = vmetrics
-            print(f"Eval {step}, {loss:.4f}, {top1:.4f}, {top5:.4f}")
+            data = dict(step=step, loss=loss, top1=top1, top5=top5)
+            log(data, "Valid | ", prefix="valid")
 
 
-from configs import default
-train(default.get_config())
+def main(_):
+    from configs import default
+    train(default.get_config())
 
+
+
+if __name__ == "__main__":
+    app.run(main)
 
 
