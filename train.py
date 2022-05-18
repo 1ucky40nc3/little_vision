@@ -4,7 +4,11 @@ from typing import Tuple
 from typing import Union
 from typing import Iterator
 
+import os
+
 from functools import partial
+
+import multiprocessing
 
 from absl import app
 from absl import logging
@@ -40,21 +44,48 @@ CONFIG_FLAG = config_flags.DEFINE_config_file(
 
 
 def do_logging(step: int, config: ConfigDict, host: int = 0) -> bool:
-    return jax.process_index() == host and step > 0 and step % config.log_every == 0
+    return (
+        jax.process_index() == host 
+        and step > 0 
+        and step % config.log_every == 0
+    )
 
 def do_eval(step: int, config: ConfigDict) -> bool:
-    return step > 0 and (step % config.eval_every == 0 or step == config.max_train_steps - 1)
+    return (
+        step > 0 
+        and (
+            (step - 1) % config.eval_every == 0 
+            or step == config.max_train_steps - 1
+        )
+    )
 
 def do_save(step: int, config: ConfigDict, host: int = 0) -> bool:
-    return jax.process_index() == host and step > 0 and step % config.log_every == 0
+    return (
+        jax.process_index() == host 
+        and step > 0 
+        and (
+            step % config.save_every == 0
+            or step == config.max_train_steps - 1
+        )
+    )
 
 
-def jaxify(tensor: torch.Tensor, config: ConfigDict) -> jnp.ndarray:
-    return jax_utils.prefetch_to_device(tensor.numpy(), config.prefetch_size)
+def jaxify(
+    tensor: torch.Tensor, 
+    config: ConfigDict
+) -> jnp.ndarray:
+    return jax_utils.prefetch_to_device(
+        tensor.numpy(), config.prefetch_size)
 
 
-def load_ds(train: bool, config: ConfigDict) -> tud.DataLoader:
-    return getattr(little_datasets, config.dataset.name)(train=train, config=config)
+def load_ds(
+    train: bool, 
+    config: ConfigDict
+) -> tud.DataLoader:
+    return getattr(
+        little_datasets, 
+        config.dataset.name
+    )(train=train, config=config)
 
 
 def log(
@@ -102,7 +133,7 @@ def resume(
         state
     )
 
-# TODO: implement for cpu and later shard
+
 @partial(jax.jit, static_argnums=(1,), backend="cpu")
 def initialize(
     rng: jnp.ndarray, 
@@ -203,6 +234,8 @@ def train(
     config: ConfigDict,
     **kwargs
 ) -> None:
+    pool = multiprocessing.pool.ThreadPool()
+
     key = jax.random.PRNGKey(config.random_seed)
     key, subkey = jax.random.split(key)
 
@@ -211,7 +244,6 @@ def train(
         state = resume(state, config)
     
     start_step = state.step
-    #state = jax.tree_map(jax_utils.replicate, state)
     state = jax_utils.replicate(state)
 
     train_ds = load_ds(train=True, config=config)
@@ -222,7 +254,9 @@ def train(
         range(start_step, config.max_train_steps), 
         little_datasets.prepare(train_ds, config)):
 
-        state, metrics = train_step(state, images, labels, config)
+        with jax.profiler.StepTraceAnnotation("train_step", step_num=step):
+            state, metrics = train_step(state, images, labels, config)
+
         metrics = jax_utils.unreplicate(metrics)
         tmetrics += jnp.array(metrics, dtype=jnp.float32)
         counter += 1
@@ -231,7 +265,7 @@ def train(
             tmetrics /= counter
             loss, top1, top5 = tmetrics
             data = dict(step=step, loss=loss, top1=top1, top5=top5)
-            log(data, "Train | ", prefix="train_")
+            log(data, "Train | ", "train_")
             tmetrics, counter = jnp.zeros((3,)), 0
 
         if do_eval(step, config):
@@ -239,15 +273,26 @@ def train(
             vmetrics /= config.max_valid_steps + 1
             loss, top1, top5 = vmetrics
             data = dict(step=step, loss=loss, top1=top1, top5=top5)
-            log(data, "Valid | ", prefix="valid_")
+            log(data, "Valid | ", "valid_")
+
+        if do_save(step, config):
+            pool.apply_async(save, (state, config))
+
+    pool.close()
+    pool.join()
 
 
 def main(_):
     config = mlc.FrozenConfigDict(CONFIG_FLAG.value)
     logging.info(f"New run with config: \n{config}")
+    os.makedirs(config.log_dir, exist_ok=True)
+    os.makedirs(config.save_dir, exist_ok=True)
 
     wandb.init(
+        dir=config.log_dir,
         project=config.project,
+        tags=config.tags,
+        notes=config.notes,
         id=config.run_id or None,
         resume=config.resume or None,
         config=config.as_configdict().to_dict())
