@@ -1,4 +1,4 @@
-from typing import List
+from typing import Union
 from typing import Iterator
 
 from functools import partial
@@ -21,6 +21,8 @@ import ml_collections as mlc
 import einops
 
 
+ConfigDict = Union[mlc.ConfigDict, mlc.FrozenConfigDict]
+
 
 def to_jax_img(image: torch.Tensor) -> torch.Tensor:
     return einops.rearrange(image, "c h w -> h w c")
@@ -28,9 +30,8 @@ def to_jax_img(image: torch.Tensor) -> torch.Tensor:
 transforms.ToJax = partial(transforms.Lambda, lambd=to_jax_img)
 
 
-
 def transform(
-    config: mlc.ConfigDict
+    config: ConfigDict
 ) -> transforms.Compose:
     t = [] # TODO: parse transform from config
     return transforms.Compose([
@@ -42,7 +43,7 @@ def transform(
 
 def mnist(
     train: bool,
-    config: mlc.ConfigDict
+    config: ConfigDict
 ) -> Iterator:
     """Return a MNIST loader.
 
@@ -72,7 +73,6 @@ def mnist(
         num_workers=config.dataset.num_workers,
         drop_last=train)
 
-    # TODO: implement prefetching
     return cycle(loader) if train else loader
 
 
@@ -85,7 +85,7 @@ def shard(array: jnp.ndarray):
 
 def prepare(
     iterator: Iterator, 
-    config: mlc.ConfigDict
+    config: ConfigDict
 ) -> Iterator:
     iterator = (
         jax.tree_map(
