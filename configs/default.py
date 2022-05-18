@@ -7,7 +7,12 @@ def get_config() -> mlc.FrozenConfigDict:
 
     config.project = "little_vision"
     config.name = "MNIST example"
+    config.tags = ("computer-vision", "classification")
+    config.notes = "Train a classifier on the MNIST dataset."
     config.do_train = True
+
+    config.resume = ""
+    config.run_id = ""
 
     config.dataset = mlc.ConfigDict()
     config.dataset.name = "mnist"
@@ -61,5 +66,6 @@ def get_config() -> mlc.FrozenConfigDict:
     config.save_interval_type = "steps"
     config.log_dir = "./logs"
     config.save_dir = "./checkpoints"
+    config.keep_num_saves = 3
 
-    return mlc.FrozenConfigDict(config)
+    return config

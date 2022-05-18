@@ -1,5 +1,3 @@
-from functools import partial
-
 import optax
 
 import ml_collections as mlc

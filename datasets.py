@@ -43,7 +43,7 @@ def transform(
 def mnist(
     train: bool,
     config: mlc.ConfigDict
-) -> tud.DataLoader:
+) -> Iterator:
     """Return a MNIST loader.
 
     Example:
@@ -73,7 +73,7 @@ def mnist(
         drop_last=train)
 
     # TODO: implement prefetching
-    return loader
+    return cycle(loader) if train else loader
 
 
 def shard(array: jnp.ndarray):
@@ -84,10 +84,9 @@ def shard(array: jnp.ndarray):
 
 
 def prepare(
-    loader: tud.DataLoader, 
+    iterator: Iterator, 
     config: mlc.ConfigDict
 ) -> Iterator:
-    iterator = cycle(loader)
     iterator = (
         jax.tree_map(
             lambda t: t.numpy(), b
