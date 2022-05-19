@@ -115,7 +115,7 @@ class BottleneckResNetBlock(nn.Module):
                 strides=self.strides,
                 name="conv_proj")(r)
             r = self.norm(
-                name="conv_proj")(r)
+                name="norm_proj")(r)
         
         return self.act(r + x)
 
