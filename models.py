@@ -130,7 +130,7 @@ class ResNet(nn.Module):
     pool: Module = partial(
         nn.max_pool,
         window_shape=(3, 3),
-        stride=(2, 2),
+        strides=(2, 2),
         padding="SAME")
     norm: Module = partial(
         nn.BatchNorm,
@@ -157,7 +157,7 @@ class ResNet(nn.Module):
         x = conv(
             features=self.features,
             kernel_size=(7, 7),
-            stride=(2, 2),
+            strides=(2, 2),
             name="conv_root")(x)
         x = norm(
             name="norm_root")(x)
@@ -167,8 +167,8 @@ class ResNet(nn.Module):
         for i, (sizes, strides) in enumerate(
             zip(self.stage_sizes, self.state_strides)):
             for j in range(sizes):
-                x = self.block_cls(
-                    self.num_filters * 2**i,
+                x = self.block_class(
+                    self.features * 2**i,
                     conv=conv,
                     norm=norm,
                     act=self.act,
@@ -189,8 +189,8 @@ ResNet34 = partial(
 ResNet50 = partial(
     ResNet,
     stage_sizes=(3, 4, 6, 3),
-    block_cls=BottleneckResNetBlock)
+    block_class=BottleneckResNetBlock)
 ResNet101 = partial(
     ResNet,
     stage_sizes=(3, 4, 23, 3),
-    block_cls=BottleneckResNetBlock)
+    block_class=BottleneckResNetBlock)
