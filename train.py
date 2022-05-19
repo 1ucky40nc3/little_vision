@@ -162,7 +162,7 @@ def initialize(
         tx=tx,
         apply_fn=model.apply, 
         params=variables.get("params"),
-        batch_stats=variables.get("batch_stats")
+        batch_stats=variables.get("batch_stats") or dict()
     )
 
 
