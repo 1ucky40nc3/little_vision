@@ -24,6 +24,7 @@ import torch.utils.data as tud
 import jax
 import jax.numpy as jnp
 
+import flax
 from flax import jax_utils
 from flax.optim import dynamic_scale
 from flax.training import checkpoints
@@ -141,20 +142,28 @@ def resume(
     )
 
 
+class TrainState(train_state.TrainState):
+    batch_stats: flax.core.frozen_dict.FrozenDict
+
+
 @partial(jax.jit, static_argnums=(1,), backend="cpu")
 def initialize(
     rng: jnp.ndarray, 
     config: ConfigDict
-) -> train_state.TrainState:
+) -> TrainState:
     cls = getattr(little_models, config.model.name)
     model = cls(**config.model.config)
     images = jnp.ones([1, *config.dataset.image_dims])
-    params = model.init(rng, images)["params"]
+    variables = model.init(rng, images)
 
     tx = little_optimizers.tx(config.optimizer)
 
-    return train_state.TrainState.create(
-        apply_fn=model.apply, params=params, tx=tx)
+    return TrainState.create(
+        tx=tx,
+        apply_fn=model.apply, 
+        params=variables.get("params"),
+        batch_stats=variables.get("batch_stats")
+    )
 
 
 @partial(
@@ -163,13 +172,16 @@ def initialize(
     static_broadcasted_argnums=(3,)
 )
 def eval_step(
-    state: train_state.TrainState,
+    state: TrainState,
     images: jnp.ndarray,
     labels: jnp.ndarray,
     config: ConfigDict
 ) -> Tuple[jnp.ndarray, Tuple[jnp.ndarray]]:
     def loss_fn(params):
-        logits = state.apply_fn({"params": params}, images)
+        logits = state.apply_fn({
+            "params": params,
+            "batch_stats": state.batch_stats
+        }, images, train=False)
         loss = getattr(little_losses, config.loss.name)(
             logits, labels, **config.loss.config)
         return loss, logits
@@ -185,7 +197,7 @@ def eval_step(
 
 
 def evaluate(
-    state: train_state.TrainState,
+    state: TrainState,
     dataset: Iterator,
     config: ConfigDict,
     **kwargs
@@ -213,25 +225,29 @@ def evaluate(
     static_broadcasted_argnums=(3,)
 )
 def train_step(
-    state: train_state.TrainState,
+    state: TrainState,
     images: jnp.ndarray,
     labels: jnp.ndarray,
     config: ConfigDict
 ) -> Tuple[jnp.ndarray, Tuple[jnp.ndarray]]:
     def loss_fn(params):
-        logits = state.apply_fn({"params": params}, images)
+        logits, mutvars = state.apply_fn({
+                "params": params,
+                "batch_stats": state.batch_stats
+            }, images, mutable=["batch_stats"])
         loss = getattr(little_losses, config.loss.name)(
             logits, labels, **config.loss.config)
-        return loss, logits
+        return loss, (logits, mutvars)
 
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-    (loss, logits), grads = grad_fn(state.params)
+    (loss, (logits, mutvars)), grads = grad_fn(state.params)
     top1 = little_metrics.top1_acc(logits, labels)
     top5 = little_metrics.top5_acc(logits, labels)
 
     grads, loss, top1, top5 = jax.lax.pmean(
         (grads, loss, top1, top5), axis_name="i")
-    state = state.apply_gradients(grads=grads)
+    state = state.apply_gradients(
+        grads=grads, batch_stats=mutvars["batch_stats"])
     metrics = jax.tree_map(jnp.mean, (loss, top1, top5))
 
     return state, metrics

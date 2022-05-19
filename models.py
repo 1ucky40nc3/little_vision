@@ -22,7 +22,7 @@ class CNN(nn.Module):
     num_classes: int = 10
 
     @nn.compact
-    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
         conv = partial(
             nn.Conv, 
             kernel_size=(3, 3))
