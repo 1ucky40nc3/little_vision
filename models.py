@@ -174,7 +174,8 @@ class ResNet(nn.Module):
                     act=self.act,
                     strides=1 if j else strides)(x)
         
-        x = jnp.mean(x, axis=(1, 2))
+        x = einops.reduce(
+            x, "n h w c -> n c", "mean")
         x = nn.Dense(
             self.num_classes,
             dtype=self.dtype)(x)
