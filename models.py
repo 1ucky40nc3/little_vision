@@ -1,6 +1,3 @@
-from ast import Call
-from base64 import encode
-from this import d
 from typing import Any
 from typing import Tuple
 from typing import Union
@@ -8,7 +5,6 @@ from typing import Callable
 from typing import Optional
 
 from functools import partial
-from click import ParamType
 
 import jax
 import jax.numpy as jnp
@@ -16,7 +12,6 @@ import jax.numpy as jnp
 import flax.linen as nn
 
 import einops
-from numpy import block
 from torch import dropout
 
 
@@ -28,7 +23,11 @@ class CNN(nn.Module):
     num_classes: int = 10
 
     @nn.compact
-    def __call__(self, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
+    def __call__(
+        self, 
+        x: jnp.ndarray, 
+        **kwargs
+    ) -> jnp.ndarray:
         conv = partial(
             nn.Conv, 
             kernel_size=(3, 3))
@@ -201,21 +200,19 @@ ResNet101 = partial(
 
 class LearnablePositionalEmbedding(nn.Module):
     init_fn: Callable = nn.initializers.normal(stddev=0.02) 
-    dtype: DType = jnp.float32
 
     @nn.compact
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         _, l, d  = x.shape
         pos_emb = self.param(
-            name="pos_emb", 
-            init_fn=self.init_fn, 
-            shape=(1, l, d),
-            dtype=self.dtype)
+            "pos_emb", 
+            self.init_fn, 
+            (1, l, d))
 
         return x + pos_emb
 
 
-class PointwiseMlpBlock(nn.Module):
+class PositionWiseMLP(nn.Module):
     mlp_dim: Optional[int] = None
     dropout: float = 0.
     kernel_init: Callable = nn.initializers.xavier_uniform()
@@ -260,7 +257,7 @@ class TransformerEncoderBlock(nn.Module):
     attn_dropout: float = 0.
     norm: Module = nn.LayerNorm
     attn: Module = nn.SelfAttention
-    mlp: Module = PointwiseMlpBlock
+    mlp: Module = PositionWiseMLP
     kernel_init: Callable = nn.initializers.xavier_uniform()
     dtype: DType = jnp.float32
 
@@ -282,10 +279,11 @@ class TransformerEncoderBlock(nn.Module):
             kernel_init=self.kernel_init)
         dropout = partial(
             nn.Dropout,
-            dropout=self.dropout)
+            rate=self.dropout)
         mlp = partial(
+            self.mlp,
             mlp_dim=self.mlp_dim,
-            dropout=dropout,
+            dropout=self.dropout,
             dtype=self.dtype)
         
         y = norm()(x)
@@ -301,15 +299,15 @@ class TransformerEncoderBlock(nn.Module):
 
 
 class TransformerEncoder(nn.Module):
-    num_layers: int
-    num_heads: int
-    mlp_dim: int
+    num_blocks: int = 1
+    num_heads: int = 8
+    mlp_dim: int = 64
     dropout: float = 0.
     attn_dropout: float = 0.
     emb: Module = LearnablePositionalEmbedding
     norm: Module = nn.LayerNorm
     attn: Module = nn.SelfAttention
-    mlp: Module = PointwiseMlpBlock
+    mlp: Module = PositionWiseMLP
 
     @nn.compact
     def __call__(
@@ -324,7 +322,7 @@ class TransformerEncoder(nn.Module):
         x = self.emb()(x)
         x = dropout()(x, not train)
 
-        for i in range(self.num_layers):
+        for i in range(self.num_blocks):
             x = TransformerEncoderBlock(
                 num_heads=self.num_heads,
                 mlp_dim=self.mlp_dim,
@@ -332,17 +330,21 @@ class TransformerEncoder(nn.Module):
                 attn_dropout=self.attn_dropout,
                 name=f"encoderblock_{i}",
             )(x, not train)
-
         x = self.norm(name="encoder_norm")(x)
 
         return x
 
 
-class VisionTransformer(nn.Module):
-    num_classes: int
-    patch_size: Tuple[int, int]
-    hidden_size: int
+class ViT(nn.Module):
+    num_classes: int = 10
+    patch_size: int = 4
+    hidden_size: int = 64
     encoder: Module = TransformerEncoder
+    num_blocks: int = 1
+    num_heads: int = 8
+    mlp_dim: int = 256
+    dropout: float = 0.
+    attn_dropout: float = 0.
     classifier: str = "token"
     head_bias: float = 0.
 
@@ -352,40 +354,139 @@ class VisionTransformer(nn.Module):
         x: jnp.ndarray, 
         train: bool = True
     ) -> jnp.ndarray:
+        patches = (self.patch_size, self.patch_size)
         x = nn.Conv(
             features=self.hidden_size,
-            kernel_size=self.patch_size,
-            strides=self.patch_size,
+            kernel_size=patches,
+            strides=patches,
             padding="VALID",
             name="vit_stem")(x)
-        
         x = einops.rearrange(
             x, "n h w c -> n (h w) c")
         
         if self.classifier == "token":
             n, _, c = x.shape
             token = self.param(
-                name="cls", 
-                init_fn=nn.initializers.zeros,
-                shape=(1, 1, c))
+                "cls",
+                nn.initializers.zeros,
+                (1, 1, c))
             token = einops.repeat(
                 token, "n l d -> (i n) l d", i=n)
             x = jnp.concatenate([token, x], axis=1)
 
-        x = self.encoder()(x, train)
+        x = self.encoder(
+            num_blocks=self.num_blocks,
+            num_heads=self.num_heads,
+            mlp_dim=self.mlp_dim,
+            dropout=self.dropout,
+            attn_dropout=self.attn_dropout)(x, train)
 
-        if self.classifier == "token":
-            x = x[:, 0]
-        else:
-            x = einops.reduce(
-                x, "n l d -> n d", "mean")
-        
-        x = nn.Dense(
-            features=self.num_classes,
-            kernel_init=nn.initializers.zeros,
-            bias_init=nn.initializers.constant(
-                self.head_bias
-            ))(x)
+        if self.num_classes:
+            if self.classifier == "token":
+                x = x[:, 0]
+            else:
+                x = einops.reduce(
+                    x, "n l d -> n d", "mean")
+            
+            x = nn.Dense(
+                features=self.num_classes,
+                kernel_init=nn.initializers.zeros,
+                bias_init=nn.initializers.constant(
+                    self.head_bias
+                ), name="head")(x)
 
         return x
-            
+
+
+
+class MixingMLP(nn.Module):
+    mlp_dim: int
+    dense: Module = nn.Dense
+    act: Callable = nn.gelu
+
+    @nn.compact
+    def __call__(
+        self, 
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
+        *_, d = x.shape
+        x = self.dense(self.mlp_dim)(x)
+        x = self.act(x)
+        x = self.dense(d)(x)
+        return x
+
+
+class MixerBlock(nn.Module):
+    tokens_mlp_dim: int
+    channels_mlp_dim: int
+    norm: Module = nn.LayerNorm
+    mlp: Module = MixingMLP
+
+    @nn.compact
+    def __call__(
+        self, 
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
+        y = self.norm()(x)
+        y = einops.rearrange(
+            y, "n l d -> n d l")
+        y = self.mlp(
+            self.tokens_mlp_dim,
+            name="token_mixing")(y)
+        y = einops.rearrange(
+            y, "n d l -> n l d")
+        x += y
+        y = self.norm()(x)
+        y = self.mlp(
+            self.channels_mlp_dim,
+            name="channel_mixing")(y)
+        return x + y
+
+
+class MLPMixer(nn.Module):
+    num_classes: int = 10
+    num_blocks: int = 3
+    patch_size: int = 4
+    hidden_dim: int = 64
+    tokens_mlp_dim: int = 256
+    channels_mlp_dim: int = 256
+    block: Module = MixerBlock
+    norm: Module = nn.LayerNorm
+
+    @nn.compact
+    def __call__(
+        self, 
+        x: jnp.ndarray, 
+        **kwargs
+    ) -> jnp.ndarray:
+        patches = (self.patch_size, self.patch_size)
+
+        x = nn.Conv(
+            features=self.hidden_dim,
+            kernel_size=patches,
+            strides=patches,
+            name="stem")(x)
+        x = einops.rearrange(
+            x, "n h w d -> n (h w) d")
+        
+        for i in range(self.num_blocks):
+            x = self.block(
+                self.tokens_mlp_dim,
+                self.channels_mlp_dim,
+                norm=self.norm,
+                name=f"mixer_block_{i}")(x)
+        x = self.norm(name="pre_head_norm")(x)
+
+        if self.num_classes:
+            x = einops.reduce(
+                x, "n l d -> n d", "mean")
+            x = nn.Dense(
+                features=self.num_classes,
+                kernel_init=nn.initializers.zeros,
+                name="head")(x)
+        
+        return x
+
+

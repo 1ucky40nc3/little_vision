@@ -3,6 +3,7 @@ from typing import Dict
 from typing import Tuple
 from typing import Union
 from typing import Iterator
+from typing import Optional
 
 import os
 
@@ -228,13 +229,19 @@ def train_step(
     state: TrainState,
     images: jnp.ndarray,
     labels: jnp.ndarray,
-    config: ConfigDict
+    config: ConfigDict,
+    rngs: Optional[jnp.ndarray] = None,
 ) -> Tuple[jnp.ndarray, Tuple[jnp.ndarray]]:
+    rngs = jax.random.fold_in(rngs, state.step)
+
     def loss_fn(params):
         logits, mutvars = state.apply_fn({
                 "params": params,
                 "batch_stats": state.batch_stats
-            }, images, mutable=["batch_stats"])
+            }, 
+            images, 
+            mutable=["batch_stats"], 
+            rngs=dict(dropout=rngs))
         loss = getattr(little_losses, config.loss.name)(
             logits, labels, **config.loss.config)
         return loss, (logits, mutvars)
@@ -272,13 +279,15 @@ def train(
     train_ds = load_ds(train=True, config=config)
     valid_ds = load_ds(train=False, config=config)
 
+    keys = jax.random.split(key, jax.local_device_count())
+
     tmetrics, counter = jnp.zeros((3,)), 0
     for step, (images, labels) in zip(
         range(start_step, config.max_train_steps), 
         little_datasets.prepare(train_ds, config)):
 
         with jax.profiler.StepTraceAnnotation("train_step", step_num=step):
-            state, metrics = train_step(state, images, labels, config)
+            state, metrics = train_step(state, images, labels, config, keys)
 
         metrics = jax_utils.unreplicate(metrics)
         tmetrics += jnp.array(metrics, dtype=jnp.float32)
@@ -308,6 +317,7 @@ def train(
 def main(_):
     config = mlc.FrozenConfigDict(CONFIG_FLAG.value)
     logging.info(f"New run with config: \n{config}")
+    # TODO: create subdir for run based on wandb run_id
     os.makedirs(config.log_dir, exist_ok=True)
     os.makedirs(config.save_dir, exist_ok=True)
 
