@@ -17,6 +17,7 @@ def get_config() -> mlc.FrozenConfigDict:
     config.dataset = mlc.ConfigDict()
     config.dataset.name = "mnist"
     config.dataset.image_dims = (28, 28, 1)
+    config.dataset.image_padding = 3
     config.dataset.train_size = 60_000
     config.dataset.valid_size = 10_000
     config.dataset.num_classes = 10
