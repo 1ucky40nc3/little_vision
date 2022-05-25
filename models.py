@@ -1,3 +1,4 @@
+from curses import window
 from typing import Any
 from typing import Tuple
 from typing import Union
@@ -12,6 +13,7 @@ import jax.numpy as jnp
 import flax.linen as nn
 
 import einops
+from numpy import expand_dims, squeeze
 from torch import dropout
 
 
@@ -85,7 +87,7 @@ class ResNetBlock(nn.Module):
 
 class BottleneckResNetBlock(nn.Module):
     features: int
-    conv: Module = nn.Conv
+    conv: Module = partial(nn.Conv, use_bias=False)
     norm: Module = nn.BatchNorm
     act: Callable = nn.relu
     strides: Union[int, Tuple[int, int]] = 1
@@ -490,3 +492,357 @@ class MLPMixer(nn.Module):
         return x
 
 
+class MBConvBlock(nn.Module):
+    expand_factor: int = 4
+
+
+    @nn.compact
+    def __call__(
+        self, 
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
+        *_, channels = x.shape
+        x = nn.BatchNorm()(x)
+        x = nn.Conv(
+            features=channels,
+            kernel=(1, 1),
+            stride=(2, 2))(x)
+        x = nn.Conv(
+            features=channels * self.expand_dims,
+            kernel=(3, 3),
+            stride=(1, 1))(x)
+        x = nn.Conv(
+            features=channels,
+            kernel=(1, 1),
+            stride=(1, 1))(x)
+
+        return x
+
+
+class SqueezeExcite(nn.Module):
+    squeeze_ratio: float = 0.25
+    act: Module = nn.gelu
+
+    @nn.compact
+    def __call__(
+        self,
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
+        conv = partial(
+            nn.Conv,
+            kernel_size=(1, 1),
+            stride=1)
+        c_current = x.shape[-1]
+        c_squeeze = int(
+            max(1, c_current * self.squeeze_ratio))
+        
+        x = jnp.mean(
+            x, 
+            axis=(1, 2),
+            dtype=jnp.float32,
+            keepdims=True)
+        x = conv(
+            features=c_squeeze,
+            name="squeeze_reduce")(x)
+        x = self.act(x)
+        x = conv(
+            features=c_current,
+            name="squeeze_expand")(x)
+        x = nn.sigmoid(x)
+
+        return x
+
+        
+        
+
+class CoAtNetConvBlock(nn.Module):
+    features: int
+    strides: int = 2
+    expand_factor: int = 4
+    squeeze_ratio: float = 0.25
+    norm: Module = nn.LayerNorm
+    act: Module = nn.gelu
+
+    @nn.compact
+    def __call__(
+        self,
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
+        conv = partial(
+            nn.Conv,
+            use_bias=False)
+        expand = int(
+            self.features * self.expand_factor)
+
+        y = conv(
+            features=expand,
+            kernel_size=(1, 1),
+            strides=self.strides,
+            name="conv_expand")(x)
+        y = self.norm()(y)
+        y = self.act(y)
+        y = conv(
+            features=expand,
+            kernel_size=(3, 3),
+            strides=1,
+            feature_group_count=expand,
+            name="conv_depthwise")(y)
+        y = self.norm()(y)
+        y = self.act(y)
+        y = SqueezeExcite(
+            squeeze_ratio=self.squeeze_ratio,
+            name="squeeze")(y)
+        y = conv(
+            features=x.shape[-1],
+            kernel_size=(1, 1),
+            strides=1,
+            name="conv_reduce")(y)
+        y = self.norm()(y)
+
+        if x.shape != y.shape:
+            x = conv(
+                features=y.shape[-1],
+                kernel_size=(1, 1),
+                strides=self.strides,
+                name="conv_proj")(x)
+            x = self.norm()(x)
+        
+        # TODO: add stochastic depth
+        return x + y
+
+
+"""
+The code for the relative attention components was adapted from:
+[1] https://flax.readthedocs.io/en/latest/_modules/flax/linen/attention.html
+[2] https://github.com/dqshuai/MetaFormer/blob/master/models/MHSA.py
+"""
+def relative_dot_product_attention(
+    query: jnp.ndarray,
+    key: jnp.ndarray,
+    value: jnp.ndarray,
+    relative_position_bias: jnp.ndarray,
+    bias: Optional[jnp.ndarray] = None,
+    mask: Optional[jnp.ndarray] = None,
+    broadcast_dropout: bool = True,
+    dropout_rng: Optional[jnp.ndarray] = None,
+    dropout_rate: float = 0.,
+    deterministic: bool = False,
+    dtype: Optional[DType] = None,
+    precision: nn.linear.PrecisionLike = None
+) -> jnp.ndarray:
+    query, key, value = nn.dtypes.promote_dtype(query, key, value, dtype=dtype)
+    dtype = query.dtype
+    assert key.ndim == query.ndim == value.ndim, 'q, k, v must have same rank.'
+    assert query.shape[:-3] == key.shape[:-3] == value.shape[:-3], (
+        'q, k, v batch dims must match.')
+    assert query.shape[-2] == key.shape[-2] == value.shape[-2], (
+        'q, k, v num_heads must match.')
+    assert key.shape[-3] == value.shape[-3], 'k, v lengths must match.'
+
+    # calculate attention matrix
+    depth = query.shape[-1]
+    query = query / jnp.sqrt(depth).astype(dtype)
+    # attn weight shape is (batch..., num_heads, q_length, kv_length)
+    attn_weights = jnp.einsum(
+        '...qhd,...khd->...hqk', 
+        query, 
+        key,
+        precision=precision)
+
+    # apply attention bias: masking, dropout, proximity bias, etc.
+    if bias is not None:
+        attn_weights = attn_weights + bias
+    # apply attention mask
+    if mask is not None:
+        big_neg = jnp.finfo(dtype).min
+        attn_weights = jnp.where(
+            mask, attn_weights, big_neg)
+
+    attn_weights += relative_position_bias
+
+    # normalize the attention weights
+    attn_weights = jax.nn.softmax(
+        attn_weights).astype(dtype)
+
+    # apply attention dropout
+    if not deterministic and dropout_rate > 0.:
+        keep_prob = 1.0 - dropout_rate
+    if broadcast_dropout:
+        # dropout is broadcast across the batch + head dimensions
+        dropout_shape = tuple([1] * (key.ndim - 2)) + attn_weights.shape[-2:]
+        keep = jax.random.bernoulli(dropout_rng, keep_prob, dropout_shape)
+    else:
+        keep = jax.random.bernoulli(dropout_rng, keep_prob, attn_weights.shape)
+    multiplier = (keep.astype(dtype) / jnp.asarray(keep_prob, dtype=dtype))
+    attn_weights = attn_weights * multiplier
+
+    # return weighted sum over values for each query position
+    return jnp.einsum(
+        '...hqk,...khd->...qhd', 
+        attn_weights, 
+        value,
+        precision=precision)
+
+
+class RelativeMultiHeadDotProductAttention(Module):
+    num_heads: int
+    dtype: Optional[DType] = None
+    param_dtype: DType = jnp.float32
+    qkv_features: Optional[int] = None
+    out_features: Optional[int] = None
+    broadcast_dropout: bool = True
+    dropout_rate: float = 0.
+    deterministic: Optional[bool] = None
+    precision: nn.linear.PrecisionLike = None
+    bias_init: Callable = nn.initializers.zeros
+    use_bias: bool = True
+    attention_fn: Callable = relative_dot_product_attention
+    decode: bool = False
+
+    @nn.compact
+    def __call__(
+        self,
+        inputs_q: jnp.ndarray,
+        inputs_kv: jnp.ndarray,
+        mask: Optional[jnp.ndarray] = None,
+        deterministic: Optional[bool] = None
+    ) -> jnp.ndarray:
+        features = self.out_features or inputs_q.shape[-1]
+        qkv_features = self.qkv_features or inputs_q.shape[-1]
+        assert qkv_features % self.num_heads == 0, (
+            'Memory dimension must be divisible by number of heads.')
+        head_dim = qkv_features // self.num_heads
+
+        dense = partial(
+            nn.DenseGeneral,
+            axis=-1,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
+            features=(self.num_heads, head_dim),
+            kernel_init=self.kernel_init,
+            bias_init=self.bias_init,
+            use_bias=self.use_bias,
+            precision=self.precision)
+        # project inputs_q to multi-headed q/k/v
+        # dimensions are then [batch..., length, n_heads, n_features_per_head]
+        query, key, value = (dense(name='query')(inputs_q),
+                            dense(name='key')(inputs_kv),
+                            dense(name='value')(inputs_kv))
+
+
+        dropout_rng = None
+        if self.dropout_rate > 0.:  # Require `deterministic` only if using dropout.
+            m_deterministic = nn.module.merge_param(
+                'deterministic', 
+                self.deterministic,
+                deterministic)
+        if not m_deterministic:
+            dropout_rng = self.make_rng('dropout')
+        else:
+            m_deterministic = True
+
+        # TODO: implement relative position bias
+        bias = 0.
+
+        # apply attention
+        x = self.attention_fn(
+            query,
+            key,
+            value,
+            bias,
+            mask=mask,
+            dropout_rng=dropout_rng,
+            dropout_rate=self.dropout_rate,
+            broadcast_dropout=self.broadcast_dropout,
+            deterministic=m_deterministic,
+            dtype=self.dtype,
+            precision=self.precision)  # pytype: disable=wrong-keyword-args
+        # back to the original inputs dimensions
+        out = nn.DenseGeneral(
+            features=features,
+            axis=(-2, -1),
+            kernel_init=self.kernel_init,
+            bias_init=self.bias_init,
+            use_bias=self.use_bias,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
+            precision=self.precision,
+            name='out')(x)
+        return out
+
+class RelativeSelfAttention(RelativeMultiHeadDotProductAttention):
+    """Self-attention special case of multi-head dot-product attention."""
+
+    @nn.compact
+    def __call__(
+        self, 
+        inputs_q: jnp.ndarray, 
+        mask: Optional[jnp.ndarray] = None,
+        deterministic: Optional[bool] = None
+    ) -> jnp.ndarray:
+        return super().__call__(inputs_q, inputs_q, mask,
+                                deterministic=deterministic)
+
+
+class CoAtNetTransformerBlock(nn.Module):
+    
+    @nn.compact
+    def __call__(
+        self,
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
+        pass
+
+"""
+class CoAtConvBlock(nn.Module):
+    expand_factor: int = 4
+
+    @nn.compact
+    def __call__(
+        self, 
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
+        y = MBConvBlock(
+            expand_factor=self.expand_factor)(x)
+        
+        x = nn.avg_pool(
+            inputs=x,
+            window_shape=(3, 3),
+            strides=(2, 2),
+            name="conv_pool")
+        x = nn.Conv(
+            features=y.shape[-1],
+            kernel_size=(1, 1),
+            stride=(1, 1),
+            name="conv_proj")
+        
+        return x + y
+
+
+class CoAtTransformerBlock(nn.Module):
+    @nn.compact
+    def __init__(
+        self,
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
+        pool = partial(
+            nn.max_pool,
+            window_shape=(3, 3),
+            strides=(2, 2))
+        
+        y = nn.LayerNorm()(x)
+        y = pool(y)
+        y = nn.SelfAttention(
+            # pass args
+        )
+        
+        x = pool(x)
+        #x = nn.
+        
+"""
