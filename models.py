@@ -672,14 +672,14 @@ def relative_dot_product_attention(
     # apply attention dropout
     if not deterministic and dropout_rate > 0.:
         keep_prob = 1.0 - dropout_rate
-    if broadcast_dropout:
-        # dropout is broadcast across the batch + head dimensions
-        dropout_shape = tuple([1] * (key.ndim - 2)) + attn_weights.shape[-2:]
-        keep = jax.random.bernoulli(dropout_rng, keep_prob, dropout_shape)
-    else:
-        keep = jax.random.bernoulli(dropout_rng, keep_prob, attn_weights.shape)
-    multiplier = (keep.astype(dtype) / jnp.asarray(keep_prob, dtype=dtype))
-    attn_weights = attn_weights * multiplier
+        if broadcast_dropout:
+            # dropout is broadcast across the batch + head dimensions
+            dropout_shape = tuple([1] * (key.ndim - 2)) + attn_weights.shape[-2:]
+            keep = jax.random.bernoulli(dropout_rng, keep_prob, dropout_shape)
+        else:
+            keep = jax.random.bernoulli(dropout_rng, keep_prob, attn_weights.shape)
+        multiplier = (keep.astype(dtype) / jnp.asarray(keep_prob, dtype=dtype))
+        attn_weights = attn_weights * multiplier
 
     # return weighted sum over values for each query position
     return jnp.einsum(
@@ -750,16 +750,15 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
             dtype=self.dtype,
             param_dtype=self.param_dtype,
             features=(self.num_heads, head_dim),
-            kernel_init=self.kernel_init,
             bias_init=self.bias_init,
             use_bias=self.use_bias,
             precision=self.precision)
         # project inputs_q to multi-headed q/k/v
         # dimensions are then [batch..., length, n_heads, n_features_per_head]
-        query, key, value = (dense(name='query')(inputs_q),
-                            dense(name='key')(inputs_kv),
-                            dense(name='value')(inputs_kv))
-
+        query, key, value = (
+            dense(name='query')(inputs_q),
+            dense(name='key')(inputs_kv),
+            dense(name='value')(inputs_kv))
 
         dropout_rng = None
         if self.dropout_rate > 0.:  # Require `deterministic` only if using dropout.
@@ -767,8 +766,8 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
                 'deterministic', 
                 self.deterministic,
                 deterministic)
-        if not m_deterministic:
-            dropout_rng = self.make_rng('dropout')
+            if not m_deterministic:
+                dropout_rng = self.make_rng('dropout')
         else:
             m_deterministic = True
 
@@ -779,11 +778,14 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
 
         relative_position_bias = self.param(
             "relative_position_bias", 
-            nn.initializers.zeros, 
+            nn.initializers.normal(stddev=.02), 
             bias_shape)
         pos = relative_positions(
             self.image_size)
         bias = relative_position_bias[pos]
+        bias = einops.rearrange(
+            bias, "a b n -> n a b")
+        bias = bias[None, :, :, :]
 
         x = self.attention_fn(
             query,
@@ -801,7 +803,6 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
         out = nn.DenseGeneral(
             features=features,
             axis=(-2, -1),
-            kernel_init=self.kernel_init,
             bias_init=self.bias_init,
             use_bias=self.use_bias,
             dtype=self.dtype,
@@ -811,17 +812,20 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
         return out
 
 class RelativeSelfAttention(RelativeMultiHeadDotProductAttention):
-    """Self-attention special case of multi-head dot-product attention."""
 
     @nn.compact
     def __call__(
         self, 
-        inputs_q: jnp.ndarray, 
+        x: jnp.ndarray, 
         mask: Optional[jnp.ndarray] = None,
         deterministic: Optional[bool] = None
     ) -> jnp.ndarray:
-        return super().__call__(inputs_q, inputs_q, mask,
-                                deterministic=deterministic)
+        return super().__call__(
+            x, 
+            x, 
+            mask,
+            deterministic=deterministic
+        )
 
 
 class CoAtNetTransformerBlock(nn.Module):

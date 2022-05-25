@@ -158,4 +158,22 @@ def test_relative_positions(
     rel_pos = models.relative_positions(img_size)
     assert (rel_pos == relative_position_index).all()
 
-test_relative_positions()
+#test_relative_positions()
+
+
+def test_relativeselfattention(
+    num_heads: int = 4,
+    img_size: Tuple[int] = (24, 24)
+) -> None:
+    rng = jax.random.PRNGKey(42)
+
+    attn = models.RelativeSelfAttention(
+        num_heads, img_size)
+    variables = attn.init(rng, jnp.ones([1, 576, 384]))
+    assert "params" in variables
+
+    out = attn.apply(variables, jnp.ones([32, 576, 384]))
+    assert out.shape == (32, 576, 384)
+
+    
+test_relativeselfattention()
