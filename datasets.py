@@ -41,9 +41,7 @@ def randaugment(
     config: ConfigDict
 ) -> Callable:
     config_str = "rand-m{m}-n{n}".format(
-        m=config.transform.randaugment.m,
-        n=config.transform.randaugment.n
-    )
+        **config.transform.randaugment)
     return transforms.Lambda(
         partial(
             rand_augment_transform, 

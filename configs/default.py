@@ -33,9 +33,11 @@ def get_config() -> mlc.FrozenConfigDict:
     config.transform.mixup_config = dict(
         num_classes=config.dataset.num_classes
     )
-    config.transform.randaugment = mlc.ConfigDict()
-    config.transform.randaugment.m = None
-    config.transform.randaugment.n = None
+    config.transform.randaugment = False
+    config.transform.randaugment_config = dict(
+        m = 15,
+        n = 2
+    )
 
     config.num_epochs = 10
     config.num_steps_per_epoch = config.dataset.train_size // config.dataset.batch_size
