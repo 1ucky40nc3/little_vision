@@ -17,15 +17,25 @@ def get_config() -> mlc.FrozenConfigDict:
     config.dataset = mlc.ConfigDict()
     config.dataset.name = "mnist"
     config.dataset.image_dims = (28, 28, 1)
-    config.dataset.image_padding = 3
     config.dataset.train_size = 60_000
     config.dataset.valid_size = 10_000
     config.dataset.num_classes = 10
+    config.dataset.mean = (0.13066047,)
+    config.dataset.std = (0.30810955,)
     config.dataset.batch_size = 512
     config.dataset.num_workers = 0
     config.dataset.root = "/tmp"
     config.dataset.download = True
     config.dataset.prefetch_size = 4
+
+    config.transform.crop_padding = 3
+    config.transform.mixup = False
+    config.transform.mixup_config = dict(
+        num_classes=config.dataset.num_classes
+    )
+    config.transform.randaugment = mlc.ConfigDict()
+    config.transform.randaugment.m = None
+    config.transform.randaugment.n = None
 
     config.num_epochs = 10
     config.num_steps_per_epoch = config.dataset.train_size // config.dataset.batch_size
