@@ -7,13 +7,15 @@ from typing import Optional
 
 from functools import partial
 
+import numpy as np
+
 import jax
 import jax.numpy as jnp
 
 import flax.linen as nn
 
 import einops
-from numpy import expand_dims, squeeze
+from numpy import expand_dims, indices, squeeze
 from torch import dropout
 
 
@@ -687,8 +689,34 @@ def relative_dot_product_attention(
         precision=precision)
 
 
-class RelativeMultiHeadDotProductAttention(Module):
+def relative_positions(
+    image_size: Tuple[int] = (32, 32),
+) -> np.ndarray:
+    h, w = image_size
+    y = np.arange(h)
+    x = np.arange(w)
+
+    coords = np.meshgrid(y, x, indexing="ij")
+    coords = np.stack(coords)
+    coords = einops.rearrange(
+        coords, "n h w -> n (h w)")
+
+    relative_coords = coords[:, :, None] - coords[:, None, :]
+    relative_coords = einops.rearrange(
+        relative_coords, "n a b -> a b n")
+    relative_coords[:, :, 0] += h - 1
+    relative_coords[:, :, 1] += w - 1
+    relative_coords[:, :, 0] *= 2 * w - 1
+
+    positions = einops.reduce(
+        relative_coords, "a b n -> a b", "sum")
+    
+    return np.int32(positions)
+
+
+class RelativeMultiHeadDotProductAttention(nn.Module):
     num_heads: int
+    image_size: Tuple[int] = (32, 32)
     dtype: Optional[DType] = None
     param_dtype: DType = jnp.float32
     qkv_features: Optional[int] = None
@@ -744,10 +772,19 @@ class RelativeMultiHeadDotProductAttention(Module):
         else:
             m_deterministic = True
 
-        # TODO: implement relative position bias
-        bias = 0.
+        bias_shape = ((
+                (2 * self.image_size[0] - 1)
+                 * (2 * self.image_size[1] - 1)
+            ), self.num_heads)
 
-        # apply attention
+        relative_position_bias = self.param(
+            "relative_position_bias", 
+            nn.initializers.zeros, 
+            bias_shape)
+        pos = relative_positions(
+            self.image_size)
+        bias = relative_position_bias[pos]
+
         x = self.attention_fn(
             query,
             key,
@@ -759,7 +796,7 @@ class RelativeMultiHeadDotProductAttention(Module):
             broadcast_dropout=self.broadcast_dropout,
             deterministic=m_deterministic,
             dtype=self.dtype,
-            precision=self.precision)  # pytype: disable=wrong-keyword-args
+            precision=self.precision)
         # back to the original inputs dimensions
         out = nn.DenseGeneral(
             features=features,
