@@ -14,7 +14,7 @@ import torch.utils.data as tud
 import torchvision
 import torchvision.transforms as transforms
 
-from timm.data import mixup
+from timm.data.mixup import Mixup
 from timm.data.auto_augment import rand_augment_transform
 
 
@@ -53,7 +53,7 @@ def transform(
     config: ConfigDict,
     t: List[nn.Module] = []
 ) -> transforms.Compose:
-    t = [] # TODO: parse transform from config
+    t = []
     return transforms.Compose([
         transforms.RandomCrop(
             size=config.dataset.image_dims[:-1],
@@ -67,7 +67,6 @@ def transform(
 def resnet_transform(
     config: ConfigDict
 ) -> transforms.Compose:
-    # TODO: replace Normalize with original instructions
     return transform(
         config, [
         transforms.RandomHorizontalFlip(),
@@ -87,24 +86,24 @@ def vit_transform(
     ])
 
 
-def mlpmixer_transform(
-    config: ConfigDict
-) -> transforms.Compose:
-    return transform(
-        config, [
-        randaugment(config)
-        # do mixup   -|
-    ])
-
-
 def coatnet_transform(
     config: ConfigDict
 ) -> transforms.Compose:
     return transform(
         config, [
         randaugment(config)
-        # do mixup   -|
     ])
+
+
+def mlpmixer_transform(
+    config: ConfigDict
+) -> transforms.Compose:
+    return transform(
+        config, [
+        randaugment(config)
+    ])
+
+
 
 
 def mnist(
@@ -146,21 +145,6 @@ def cifar100(
     train: bool,
     config: ConfigDict
 ) -> Iterator:
-    """Return a MNIST loader.
-
-    Example:
-        >>> dataset_config = mlc.ConfigDict()
-        >>> dataset_config.batch_size = 32
-        >>> dataset_config.num_workers = 0
-        >>> loader = mnist(train=True, config=dataset_config)
-        >>> images, labels = next(iter(loader))
-        >>> print(images.shape)
-        torch.Size([32, 28, 28, 1])
-        >>> print(labels.shape)
-        torch.Size([32])
-        >>> print(images.min(), images.max())
-        tensor(0.) tensor(1.)
-    """
     dataset = torchvision.datasets.CIFAR100(
         root=config.dataset.root, 
         train=train, 
@@ -189,7 +173,7 @@ def prepare(
     config: ConfigDict
 ) -> Iterator:
     if config.transform.mixup:
-        mixup_fn = mixup.Mixup(
+        mixup_fn = Mixup(
             config.transform.mixup_config)
         iterator = (
             jax.tree_map(

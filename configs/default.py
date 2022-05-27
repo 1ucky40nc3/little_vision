@@ -1,5 +1,10 @@
 import ml_collections as mlc
 
+from configs import models
+from configs import datasets
+
+from configs.utils import set
+
 
 def get_config() -> mlc.FrozenConfigDict:
     """Basic config for the MNIST example."""
@@ -14,58 +19,29 @@ def get_config() -> mlc.FrozenConfigDict:
     config.resume = ""
     config.run_id = ""
 
-    config.dataset = mlc.ConfigDict()
-    config.dataset.name = "mnist"
-    config.dataset.image_dims = (28, 28, 1)
-    config.dataset.train_size = 60_000
-    config.dataset.valid_size = 10_000
-    config.dataset.num_classes = 10
-    config.dataset.mean = (0.13066047,)
-    config.dataset.std = (0.30810955,)
+    config.dataset = datasets.mnist.get_config()
     config.dataset.batch_size = 512
     config.dataset.num_workers = 0
     config.dataset.root = "/tmp"
     config.dataset.download = True
     config.dataset.prefetch_size = 4
 
-    config.transform.crop_padding = 3
-    config.transform.mixup = False
-    config.transform.mixup_config = dict(
-        num_classes=config.dataset.num_classes
-    )
-    config.transform.randaugment = False
-    config.transform.randaugment_config = dict(
-        m = 15,
-        n = 2
-    )
-
     config.num_epochs = 10
-    config.num_steps_per_epoch = config.dataset.train_size // config.dataset.batch_size
-    config.max_train_steps = config.num_steps_per_epoch * config.num_epochs
+    config.num_steps = None
+    config.epoch_steps = config.dataset.train_size // config.dataset.batch_size
+    config.max_train_steps = set(config.num_steps, config.num_epochs * config.epoch_steps)
+    config.warmup_steps = 0
+    config.decay_steps = config.max_train_steps - config.warmup_steps
     config.max_valid_steps = config.dataset.valid_size // config.dataset.batch_size
 
-    config.model = mlc.ConfigDict()
-    config.model.name = "CNN"
-    config.model.config = dict(
-        num_classes=config.dataset.num_classes)
-    
     config.loss = mlc.ConfigDict()
     config.loss.name = "softmax_cross_entropy"
     config.loss.config = dict(
         num_classes=config.dataset.num_classes)
 
-    config.optimizer = mlc.ConfigDict()
-    config.optimizer.tx_name = "scale_by_adam"
-    config.optimizer.tx_config = {}
-    config.optimizer.gc_norm = 1.
-    config.optimizer.wd = 1e-4
-    config.optimizer.schedule_name = "warmup_cosine"
-    config.optimizer.schedule_config = dict(
-        num_epochs=config.num_epochs,
-        warmup_epochs=2,
-        base_lr=1e-3,
-        num_steps_per_epoch=config.num_steps_per_epoch
-    )
+    config.model = models.cnn.model(config)
+    config.optimizer = models.cnn.optimizer(config)
+    config.transform = models.cnn.preprocessing(config)
 
     config.metrics = mlc.ConfigDict()
     config.metrics.names = ("loss", "top1_acc", "top5_acc")
