@@ -48,7 +48,7 @@ def get_config() -> mlc.FrozenConfigDict:
     
     config.random_seed = 42
     config.log_every = 10
-    config.eval_every = 300
+    config.eval_every = 50
     config.save_every = 300
     config.log_interval_type = "steps"
     config.eval_interval_type = "steps"

@@ -1,5 +1,6 @@
 from typing import Any
 from typing import Dict
+from typing import List
 from typing import Tuple
 from typing import Union
 from typing import Iterator
@@ -30,6 +31,8 @@ from flax import jax_utils
 from flax.optim import dynamic_scale
 from flax.training import checkpoints
 from flax.training import train_state
+
+import einops
 
 import models as little_models
 import optimizers as little_optimizers
@@ -143,6 +146,8 @@ def resume(
     )
 
 
+
+
 class TrainState(train_state.TrainState):
     batch_stats: flax.core.frozen_dict.FrozenDict
 
@@ -188,13 +193,7 @@ def eval_step(
         return loss, logits
 
     loss, logits = loss_fn(state.params)
-    top1 = little_metrics.top1_acc(logits, labels)
-    top5 = little_metrics.top5_acc(logits, labels)
-
-    metrics = jax.lax.pmean((loss, top1, top5), axis_name="i")
-    metrics = jax.tree_map(jnp.mean, metrics)
-
-    return metrics
+    return loss, logits
 
 
 def evaluate(
@@ -203,20 +202,20 @@ def evaluate(
     config: ConfigDict,
     **kwargs
 ) -> None:
-    metrics = jnp.zeros((3,))
+    vloss, vlogits, vlabels = [], [], []
     for step, (images, labels) in enumerate(
         little_datasets.prepare(dataset, config)):
 
-        bmetrics = eval_step(state, images, labels, config)
-        bmetrics = jax_utils.unreplicate(bmetrics)
-        metrics += jnp.array(bmetrics, dtype=jnp.float32)
+        loss, logits = eval_step(state, images, labels, config)
+        vloss.append(loss)
+        vlogits.append(logits)
+        vlabels.append(labels)
 
         if step and step % config.log_every == 0:
-            loss, top1, top5 = metrics / (step + 1)
-            data = dict(loss=loss, top1=top1, top5=top5)
+            data = little_metrics.calc(vloss, vlogits, vlabels)
             log(step, data, "Valid | ", prefix="valid_", only_std=True)
 
-    return metrics
+    return vloss, vlogits, vlabels
 
 
 @partial(
@@ -248,16 +247,12 @@ def train_step(
 
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, (logits, mutvars)), grads = grad_fn(state.params)
-    top1 = little_metrics.top1_acc(logits, labels)
-    top5 = little_metrics.top5_acc(logits, labels)
 
-    grads, loss, top1, top5 = jax.lax.pmean(
-        (grads, loss, top1, top5), axis_name="i")
+    grads  = jax.lax.pmean(grads, axis_name="i")
     state = state.apply_gradients(
         grads=grads, batch_stats=mutvars["batch_stats"])
-    metrics = jax.tree_map(jnp.mean, (loss, top1, top5))
 
-    return state, metrics
+    return state, (loss, logits)
 
 
 def train(
@@ -281,30 +276,26 @@ def train(
 
     keys = jax.random.split(key, jax.local_device_count())
 
-    tmetrics, counter = jnp.zeros((3,)), 0
+    tloss, tlogits, tlabels, = [], [], []
     for step, (images, labels) in zip(
         range(start_step, config.max_train_steps), 
         little_datasets.prepare(train_ds, config)):
 
         with jax.profiler.StepTraceAnnotation("train_step", step_num=step):
-            state, metrics = train_step(state, images, labels, config, keys)
+            state, (loss, logits) = train_step(state, images, labels, config, keys)
 
-        metrics = jax_utils.unreplicate(metrics)
-        tmetrics += jnp.array(metrics, dtype=jnp.float32)
-        counter += 1
+        tloss.append(loss)
+        tlogits.append(logits)
+        tlabels.append(labels)
 
         if do_logging(step, config):
-            tmetrics /= counter
-            loss, top1, top5 = tmetrics
-            data = dict(loss=loss, top1=top1, top5=top5)
+            data = little_metrics.calc(tloss, tlogits, tlabels)
             log(step, data, "Train | ", "train_")
-            tmetrics, counter = jnp.zeros((3,)), 0
+            tloss, tlogits, tlabels = [], [], []
 
         if do_eval(step, config):
             vmetrics = evaluate(state, valid_ds, config)
-            vmetrics /= config.max_valid_steps + 1
-            loss, top1, top5 = vmetrics
-            data = dict(loss=loss, top1=top1, top5=top5)
+            data = little_metrics.calc(*vmetrics)
             log(step, data, "Valid | ", "valid_")
 
         if do_save(step, config):
