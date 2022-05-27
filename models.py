@@ -1,4 +1,6 @@
+from ast import Call
 from curses import window
+from re import S
 from typing import Any
 from typing import Tuple
 from typing import Union
@@ -21,6 +23,29 @@ from torch import dropout
 
 DType = Any
 Module = Union[partial, nn.Module]
+
+
+"""Note:
+
+Parts of this code have been taken from other authors.
+This is common a practice but shall be highlighted nevertheless.
+
+For the sources regarding ResNet look here:
+[1] https://github.com/google-research/big_vision/blob/main/big_vision/models/bit.py
+[2] https://github.com/google/flax/blob/main/examples/imagenet/models.py
+[3] https://github.com/google-research/vision_transformer/blob/main/vit_jax/models_resnet.py
+
+References for the ViT Implementation may also be found in [1, 3].
+
+The CoAtNet implementation borrows code from:
+[4] https://github.com/dqshuai/MetaFormer/tree/master/models
+[5] https://github.com/rwightman/efficientnet-jax/tree/master/jeffnet/linen
+[6] https://github.com/google/flax/blob/main/flax/linen/attention.py
+
+The MLP-Mixer implementation is implemented as described in the paper:
+[7] https://arxiv.org/abs/2105.01601v4
+[8] https://github.com/rwightman/efficientnet-jax/tree/master/jeffnet/linen (DropPath)
+"""
 
 
 class CNN(nn.Module):
@@ -249,11 +274,6 @@ class PositionWiseMLP(nn.Module):
         return x
 
 
-
-class MultiHeadScaledDotProductAttention(nn.Module):
-    pass
-
-
 class TransformerEncoderBlock(nn.Module):
     mlp_dim: Optional[int] = None
     num_heads: int = 4
@@ -291,7 +311,7 @@ class TransformerEncoderBlock(nn.Module):
             dtype=self.dtype)
         
         y = norm()(x)
-        y = attn()(x)
+        y = attn()(y, deterministic)
         y = dropout()(y, deterministic)
         x += y
         y = norm()(x)
@@ -402,37 +422,8 @@ class ViT(nn.Module):
         return x
 
 
-def drop_path(
-    x: jnp.ndarray, 
-    drop_rate: float = 0., 
-    rng=None
-) -> jnp.ndarray:
-    """This code has been taken from:
-    https://github.com/rwightman/efficientnet-jax/blob/master/jeffnet/linen/layers/stochastic.py
-    """
-    if drop_rate == 0.:
-        return x
-
-    keep_prob = 1. - drop_rate
-    if rng is None:
-        rng = nn.make_rng()
-
-    mask = jax.random.bernoulli(
-        key=rng, 
-        p=keep_prob, 
-        shape=(x.shape[0], 1, 1, 1))
-    mask = jnp.broadcast_to(
-        mask, x.shape)
-    return jax.lax.select(
-        mask, 
-        x / keep_prob, 
-        jnp.zeros_like(x))
-
 
 class DropPath(nn.Module):
-    """This code has been taken from:
-    https://github.com/rwightman/efficientnet-jax/blob/master/jeffnet/linen/layers/stochastic.py
-    """
     rate: float = 0.
 
     @nn.compact
@@ -444,9 +435,21 @@ class DropPath(nn.Module):
     ) -> jnp.ndarray:
         if not training or self.rate == 0.:
             return x
+
         if rng is None:
             rng = self.make_rng('dropout')
-        return drop_path(x, self.rate, rng)
+
+        keep_prob = 1. - self.rate
+        mask = jax.random.bernoulli(
+            key=rng, 
+            p=keep_prob, 
+            shape=(x.shape[0], 1, 1, 1))
+        mask = jnp.broadcast_to(
+            mask, x.shape)
+        return jax.lax.select(
+            mask, 
+            x / keep_prob, 
+            jnp.zeros_like(x))
 
 
 class MixingMLP(nn.Module):
@@ -548,9 +551,37 @@ class MLPMixer(nn.Module):
         return x
 
 
+class CoAtNetStemBlock(nn.Module):
+    features: int = 64
+    kernel_size: Tuple[int] = (3, 3)
+    strides: Tuple[int] = (2, 2)
+    norm: Module = nn.LayerNorm
+    act: Callable = nn.gelu
+
+    @nn.compact
+    def __init__(
+        self,
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
+        conv = partial(
+            nn.Conv,
+            features=self.features,
+            kernel_size=self.kernel_size)
+        
+        x = self.norm()(x)
+        x = conv(
+            strides=self.strides)(x)
+        x = self.act(x)
+        x = self.norm()(x)
+        x = conv()(x)
+        
+        return x
+
+
+
 class MBConvBlock(nn.Module):
     expand_factor: int = 4
-
 
     @nn.compact
     def __call__(
@@ -611,13 +642,13 @@ class SqueezeExcite(nn.Module):
         return x
 
         
-        
 
 class CoAtNetConvBlock(nn.Module):
     features: int
     strides: int = 2
     expand_factor: int = 4
     squeeze_ratio: float = 0.25
+    drop_path: float = 0.
     norm: Module = nn.LayerNorm
     act: Module = nn.gelu
 
@@ -625,6 +656,7 @@ class CoAtNetConvBlock(nn.Module):
     def __call__(
         self,
         x: jnp.ndarray,
+        training: bool = False,
         **kwargs
     ) -> jnp.ndarray:
         conv = partial(
@@ -657,6 +689,9 @@ class CoAtNetConvBlock(nn.Module):
             strides=1,
             name="conv_reduce")(y)
         y = self.norm()(y)
+        y = DropPath(
+            rate=self.drop_path
+        )(y, training)
 
         if x.shape != y.shape:
             x = conv(
@@ -666,20 +701,13 @@ class CoAtNetConvBlock(nn.Module):
                 name="conv_proj")(x)
             x = self.norm()(x)
         
-        # TODO: add stochastic depth
         return x + y
 
 
-"""
-The code for the relative attention components was adapted from:
-[1] https://flax.readthedocs.io/en/latest/_modules/flax/linen/attention.html
-[2] https://github.com/dqshuai/MetaFormer/blob/master/models/MHSA.py
-"""
 def relative_dot_product_attention(
     query: jnp.ndarray,
     key: jnp.ndarray,
     value: jnp.ndarray,
-    relative_position_bias: jnp.ndarray,
     bias: Optional[jnp.ndarray] = None,
     mask: Optional[jnp.ndarray] = None,
     broadcast_dropout: bool = True,
@@ -698,26 +726,22 @@ def relative_dot_product_attention(
         'q, k, v num_heads must match.')
     assert key.shape[-3] == value.shape[-3], 'k, v lengths must match.'
 
-    # calculate attention matrix
     depth = query.shape[-1]
     query = query / jnp.sqrt(depth).astype(dtype)
-    # attn weight shape is (batch..., num_heads, q_length, kv_length)
+
     attn_weights = jnp.einsum(
         '...qhd,...khd->...hqk', 
         query, 
         key,
         precision=precision)
 
-    # apply attention bias: masking, dropout, proximity bias, etc.
     if bias is not None:
         attn_weights = attn_weights + bias
-    # apply attention mask
+
     if mask is not None:
         big_neg = jnp.finfo(dtype).min
         attn_weights = jnp.where(
             mask, attn_weights, big_neg)
-
-    attn_weights += relative_position_bias
 
     # normalize the attention weights
     attn_weights = jax.nn.softmax(
@@ -815,7 +839,7 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
             dense(name='value')(inputs_kv))
 
         dropout_rng = None
-        if self.dropout_rate > 0.:  # Require `deterministic` only if using dropout.
+        if self.dropout_rate > 0.:
             m_deterministic = nn.module.merge_param(
                 'deterministic', 
                 self.deterministic,
@@ -845,7 +869,7 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
             query,
             key,
             value,
-            bias,
+            bias=bias,
             mask=mask,
             dropout_rng=dropout_rng,
             dropout_rate=self.dropout_rate,
@@ -866,7 +890,6 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
         return out
 
 class RelativeSelfAttention(RelativeMultiHeadDotProductAttention):
-
     @nn.compact
     def __call__(
         self, 
@@ -883,61 +906,131 @@ class RelativeSelfAttention(RelativeMultiHeadDotProductAttention):
 
 
 class CoAtNetTransformerBlock(nn.Module):
-    
-    @nn.compact
-    def __call__(
-        self,
-        x: jnp.ndarray,
-        **kwargs
-    ) -> jnp.ndarray:
-        pass
-
-"""
-class CoAtConvBlock(nn.Module):
-    expand_factor: int = 4
+    features: Optional[int] = None
+    strides: int = 1
+    num_heads: int = 4
+    dropout: float = 0.
+    drop_path: float = 0.
+    to_tokens: bool = False
+    norm: Module = nn.LayerNorm
+    attn: Module = nn.SelfAttention
+    mlp: Module = PositionWiseMLP
+    kernel_init: Callable = nn.initializers.xavier_uniform()
+    dtype: DType = jnp.float32
 
     @nn.compact
     def __call__(
         self, 
-        x: jnp.ndarray,
+        x: jnp.ndarray, 
+        training: bool = True,
         **kwargs
     ) -> jnp.ndarray:
-        y = MBConvBlock(
-            expand_factor=self.expand_factor)(x)
-        
-        x = nn.avg_pool(
-            inputs=x,
-            window_shape=(3, 3),
-            strides=(2, 2),
-            name="conv_pool")
-        x = nn.Conv(
-            features=y.shape[-1],
-            kernel_size=(1, 1),
-            stride=(1, 1),
-            name="conv_proj")
-        
-        return x + y
-
-
-class CoAtTransformerBlock(nn.Module):
-    @nn.compact
-    def __init__(
-        self,
-        x: jnp.ndarray,
-        **kwargs
-    ) -> jnp.ndarray:
+        # TODO: handle 'deterministic' vs 'training'
+        norm = partial(
+            self.norm,
+            dtype=self.dtype)
+        attn = partial(
+            self.attn,
+            num_heads=self.num_heads,
+            dtype=self.dtype,
+            dropout_rate=self.dropout,
+            deterministic=training,
+            kernel_init=self.kernel_init)
+        drop_path = partial(
+            DropPath,
+            rate=self.dropout)
+        mlp = partial(
+            self.mlp,
+            mlp_dim=self.features,
+            dropout=self.dropout,
+            dtype=self.dtype)
         pool = partial(
             nn.max_pool,
-            window_shape=(3, 3),
-            strides=(2, 2))
+            window_shape=(3,),
+            strides=(self.strides,),
+            padding="SAME")
         
-        y = nn.LayerNorm()(x)
-        y = pool(y)
-        y = nn.SelfAttention(
-            # pass args
-        )
+        if self.to_tokens:
+            x = einops.rearrange(
+                x, "n h w c -> n (h w) c")
+
+        y = norm()(x)
         
-        x = pool(x)
-        #x = nn.
+        if self.strides != 1:
+            y = pool()(y)
+            x = pool()(x)
+
+        y = attn()(y, training)
+        y = drop_path()(y, training)
+        x += y
+        y = norm()(x)
+        y = mlp()(y, training)
+        y = drop_path()(y, training)
+
+        if x.shape[-1] != self.features:
+            x = nn.Dense(
+                features=self.features,
+                use_bias=False,
+                name="attn_proj")(x)
+        x += y
+
+        return x
+
+
+class CoAtNet(nn.Module):
+    num_classes: int
+    num_stages: Tuple[int] = (1, 1, 1, 1, 1)
+    strides: int = 2
+    hidden_dims: Tuple[int] = (64, 96, 192, 384, 768)
+    dropout: float = 0.
+    drop_path: float = 0.
+    num_heads: int = 6
+    head_bias: float = 0.
+
+    @nn.compact
+    def __call__(
+        self,
+        x: jnp.ndarray,
+        training: bool = False,
+        **kwargs
+    ) -> jnp.ndarray:
+        for i, (l, h) in enumerate(
+            zip(self.num_stages, self.hidden_dims)):
+            for j in range(l):
+                s = 1 if j else self.strides
+
+                if i == 0:
+                    x = CoAtNetStemBlock(
+                        features=h,
+                        strides=s,
+                        name=f"S{i}_L{j}"
+                    )(x, training)
+                elif i in (1, 2):
+                    x = CoAtNetConvBlock(
+                        features=h,
+                        strides=s,
+                        drop_path=self.drop_path,
+                        name=f"S{i}_L{j}"
+                    )(x, training)
+                elif i in (3, 4):
+                    to_tokens = i == 3 and j == 0
+                    x = CoAtNetTransformerBlock(
+                        features=h,
+                        strides=s,
+                        num_heads=self.num_heads,
+                        dropout=self.dropout,
+                        drop_path=self.drop_path,
+                        to_tokens=to_tokens,
+                        name=f"S{i}_L{j}"
+                    )(x, training)
+
+        x = einops.reduce(
+            x, "n l d -> n d", "mean")  
+        x = nn.Dense(
+            features=self.num_classes,
+            kernel_init=nn.initializers.zeros,
+            bias_init=nn.initializers.constant(
+                self.head_bias
+            ), name="head")(x) # TODO: check if initializer works
         
-"""
+        return x
