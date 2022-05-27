@@ -926,6 +926,7 @@ class CoAtNetTransformerBlock(nn.Module):
         **kwargs
     ) -> jnp.ndarray:
         # TODO: handle 'deterministic' vs 'training'
+        # TODO: debug how MetaFormer handles shortcuts
         norm = partial(
             self.norm,
             dtype=self.dtype)
