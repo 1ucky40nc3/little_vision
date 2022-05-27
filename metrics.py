@@ -32,9 +32,10 @@ def precision_recall_f1(
         logits, axis=-1
     ).reshape(-1)
 
+    classes = list(range(logits.shape[-1]))
     precision, recall, f1, _ = (
         metrics.precision_recall_fscore_support(
-        labels, preds, average="macro"))
+        labels, preds, labels=classes, average="macro"))
 
     return precision, recall, f1
 
