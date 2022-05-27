@@ -402,6 +402,52 @@ class ViT(nn.Module):
         return x
 
 
+def drop_path(
+    x: jnp.ndarray, 
+    drop_rate: float = 0., 
+    rng=None
+) -> jnp.ndarray:
+    """This code has been taken from:
+    https://github.com/rwightman/efficientnet-jax/blob/master/jeffnet/linen/layers/stochastic.py
+    """
+    if drop_rate == 0.:
+        return x
+
+    keep_prob = 1. - drop_rate
+    if rng is None:
+        rng = nn.make_rng()
+
+    mask = jax.random.bernoulli(
+        key=rng, 
+        p=keep_prob, 
+        shape=(x.shape[0], 1, 1, 1))
+    mask = jnp.broadcast_to(
+        mask, x.shape)
+    return jax.lax.select(
+        mask, 
+        x / keep_prob, 
+        jnp.zeros_like(x))
+
+
+class DropPath(nn.Module):
+    """This code has been taken from:
+    https://github.com/rwightman/efficientnet-jax/blob/master/jeffnet/linen/layers/stochastic.py
+    """
+    rate: float = 0.
+
+    @nn.compact
+    def __call__(
+        self, 
+        x: jnp.ndarray, 
+        training: bool = False,
+        rng: jax.random.PRNGKey = None
+    ) -> jnp.ndarray:
+        if not training or self.rate == 0.:
+            return x
+        if rng is None:
+            rng = self.make_rng('dropout')
+        return drop_path(x, self.rate, rng)
+
 
 class MixingMLP(nn.Module):
     mlp_dim: int
@@ -426,11 +472,13 @@ class MixerBlock(nn.Module):
     channels_mlp_dim: int
     norm: Module = nn.LayerNorm
     mlp: Module = MixingMLP
+    drop_path: float = 0.
 
     @nn.compact
     def __call__(
         self, 
         x: jnp.ndarray,
+        training: bool = False,
         **kwargs
     ) -> jnp.ndarray:
         y = self.norm()(x)
@@ -441,11 +489,17 @@ class MixerBlock(nn.Module):
             name="token_mixing")(y)
         y = einops.rearrange(
             y, "n d l -> n l d")
+        y = DropPath(
+            rate=self.drop_path
+        )(y, training)
         x += y
         y = self.norm()(x)
         y = self.mlp(
             self.channels_mlp_dim,
             name="channel_mixing")(y)
+        y = DropPath(
+            rate=self.drop_path
+        )(y, training)
         return x + y
 
 
