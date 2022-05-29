@@ -213,10 +213,11 @@ class ResNet(nn.Module):
         return x
 
 ResNet18 = ResNet
+# params: 21.508.004
 ResNet34 = partial(
     ResNet,
     stage_sizes=(3, 4, 6, 3))
-
+# params: 23.712.932
 ResNet50 = partial(
     ResNet,
     stage_sizes=(3, 4, 6, 3),
@@ -422,6 +423,25 @@ class ViT(nn.Module):
         return x
 
 
+# params: 25.766.500
+ViTSmall = partial(
+    ViT,
+    patch_size=16,
+    hidden_size=512,
+    num_blocks=8,
+    mlp_dim=2048,
+    num_heads=8)
+
+
+# params: 85.875.556
+ViTBase = partial(
+    ViT,
+    patch_size=16,
+    hidden_size=768,
+    num_blocks=12,
+    mlp_dim=3072,
+    num_heads=12)
+
 
 class DropPath(nn.Module):
     rate: float = 0.
@@ -549,6 +569,25 @@ class MLPMixer(nn.Module):
                 name="head")(x)
         
         return x
+
+
+# size: 18.066.564
+MLPMixerS = partial(
+    MLPMixer,
+    num_blocks=8,
+    hidden_dim=512,
+    patch_size=16,
+    tokens_mlp_dim=256,
+    channels_mlp_dim=2048)
+
+# size: 59.188.372
+MLPMixerB = partial(
+    MLPMixer,
+    num_blocks=12,
+    hidden_dim=768,
+    patch_size=16,
+    tokens_mlp_dim=384,
+    channels_mlp_dim=3072)
 
 
 class CoAtNetStemBlock(nn.Module):
@@ -907,7 +946,7 @@ class RelativeSelfAttention(RelativeMultiHeadDotProductAttention):
 
 class CoAtNetTransformerBlock(nn.Module):
     features: Optional[int] = None
-    strides: int = 1
+    do_pool: bool = False
     num_heads: int = 4
     dropout: float = 0.
     drop_path: float = 0.
@@ -945,21 +984,30 @@ class CoAtNetTransformerBlock(nn.Module):
             mlp_dim=self.features,
             dropout=self.dropout,
             dtype=self.dtype)
-        pool = partial(
-            nn.max_pool,
-            window_shape=(3,),
-            strides=(self.strides,),
-            padding="SAME")
         
         if self.to_tokens:
             x = einops.rearrange(
                 x, "n h w c -> n (h w) c")
 
         y = norm()(x)
-        
-        if self.strides != 1:
-            y = pool()(y)
-            x = pool()(x)
+        if self.do_pool:
+            y = nn.max_pool(
+                y,
+                window_shape=(3, 3),
+                strides=(2, 2),
+                padding="SAME")
+            y = einops.rearrange(
+                y, "n h w c -> n (h w) c")
+
+            x = nn.Conv(
+                features=self.features,
+                kernel_size=(3, 3),
+                strides=(2, 2),
+                name="proj_conv")(x)
+            x = self.norm(
+                name="proj_norm")(x)
+            x = einops.rearrange(
+                x, "n h w c -> n (h w) c")
 
         y = attn()(y, training)
         y = drop_path()(y, training)
@@ -967,12 +1015,6 @@ class CoAtNetTransformerBlock(nn.Module):
         y = norm()(x)
         y = mlp()(y, training)
         y = drop_path()(y, training)
-
-        if x.shape[-1] != self.features:
-            x = nn.Dense(
-                features=self.features,
-                use_bias=False,
-                name="attn_proj")(x)
         x += y
 
         return x
