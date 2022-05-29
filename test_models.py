@@ -18,89 +18,37 @@ from typing import Any
 from typing import Callable
 
 
-def tree_equal(a: Any, b: Any) -> bool:
-    a_values, a_treedef = jax.tree_util.tree_flatten(a)
-    b_values, b_treedef = jax.tree_util.tree_flatten(b)
-    
-    return (
-        a_treedef == b_treedef
-        and all([
-            (i == j).all() 
-            for i, j in zip(a_values, b_values)
-        ])
-    )
 
 
-def test_resnetblock(
-    features: int = 64,
-    dims: Tuple[int] = (28, 28, 1)
-) -> None:
-    rng = jax.random.PRNGKey(42)
 
-    block = models.ResNetBlock(
-        features=features,
-        norm=partial(
-            nn.BatchNorm, 
-            use_running_average=True))
-    variables = block.init(rng, jnp.ones([1, *dims]))
-    assert "params" in variables and "batch_stats" in variables
 
-    out = block.apply(variables, jnp.ones([10, *dims]))
-    assert out.shape == (10, *dims[:-1], features)
        
 #test_resnetblock()
 
 
-def test_bottleneckresnetblock(
-    features: int = 64,
-    dims: Tuple[int] = (28, 28, 1)
-) -> None:
-    rng = jax.random.PRNGKey(42)
 
-    block = models.BottleneckResNetBlock(
-        features=features,
-        norm=partial(
-            nn.BatchNorm, 
-            use_running_average=True))
-    variables = block.init(rng, jnp.ones([1, *dims]))
-    assert "params" in variables and "batch_stats" in variables
-
-    out = block.apply(variables, jnp.ones([10, *dims]))
-    assert out.shape == (10, *dims[:-1], features * 4)
    
 #test_bottleneckresnetblock()
 
 
-def test_resnet(
-    features: int = 64,
-    dims: Tuple[int] = (28, 28, 1)
-) -> None:
-    rng = jax.random.PRNGKey(42)
 
-    resnet = models.ResNet(
-        features=features,
-        norm=partial(
-            nn.BatchNorm, 
-            use_running_average=True))
-    variables = resnet.init(rng, jnp.ones([1, *dims]))
-    assert "params" in variables and "batch_stats" in variables
-
-    sample = jnp.ones([10, *dims])
-    out = resnet.apply(
-        variables, 
-        sample, 
-        train=False)
-    assert out.shape == (10, resnet.num_classes)
-
-    out, mutated_vars = resnet.apply(
-        variables, 
-        sample, 
-        train=True, 
-        mutable=["batch_stats"])
-    assert out.shape == (10, resnet.num_classes)
-    assert "batch_stats" in mutated_vars.keys()
 
 #test_resnet()
+
+
+
+
+
+#test_resnet34_size()
+
+
+
+
+
+#test_vit_size()
+
+
+
 
 
 def test_conv(
@@ -129,6 +77,21 @@ def test_conv(
     assert (out0 == out1).all()
 
 #test_conv()
+
+def test_coatnetconv(
+    features: int = 64,
+    image_dims: Tuple[int] = (32, 32, 3)
+) -> None:
+    rng = jax.random.PRNGKey(42)
+
+    block = models.CoAtNetConvBlock(
+        features=features)
+
+    x = jnp.ones((1, *image_dims))
+    variables = block.init(rng, x)
+    print(sum(p.size for p in jax.tree_leaves(variables["params"])))
+
+#test_coatnetconv()
 
     
 def test_relative_positions(
@@ -175,5 +138,88 @@ def test_relativeselfattention(
     out = attn.apply(variables, jnp.ones([32, 576, 384]))
     assert out.shape == (32, 576, 384)
 
+    print(sum(p.size for p in jax.tree_leaves(variables["params"])))
+
+#test_relativeselfattention()
+
+
+def test_coatnet_flow(
+    image_dims: Tuple[int] = (32, 32, 3)
+) -> None:
+    pool = partial(
+        nn.max_pool,
+        window_shape=(3, 3),
+        strides=(2, 2),
+        padding="SAME")
+
+    x = jnp.ones([1, *image_dims])
+    print("x", x.shape)
+    x = pool(x)
+    print("s0", x.shape)
+    x = pool(x)
+    print("s1", x.shape)
+    x = pool(x)
+    print("s2", x.shape)
+    x = pool(x)
+    print("s3", x.shape)
+    x = pool(x)
+    print("s4", x.shape)
+
+#test_coatnet_flow()
+
+
+def test_coatnet(
+    image_dims: Tuple[int] = (32, 32, 3),
+    num_classes: int = 100,
+) -> None:
+    rng = jax.random.PRNGKey(42)
+
+    coatnet = models.CoAtNet(
+        num_classes=num_classes)
+    variables = coatnet.init(rng, jnp.ones([1, *image_dims]))
+
+    out = coatnet.apply(variables, jnp.ones([32, *image_dims]))
+    assert out.shape == (32, num_classes)
+
+#test_coatnet()
+
+
+def test_coatnet_size(
+    num_classes: int = 1000,
+    dims: Tuple[int] = (224, 224, 3)
+) -> None:
+    rng = jax.random.PRNGKey(42)
+
+    coatnet = models.CoAtNet0(
+        num_classes=num_classes)
+    variables = coatnet.init(rng, jnp.ones([1, *dims]))
+    print(sum(p.size for p in jax.tree_leaves(variables["params"])))
+    """
+    coatnet = models.CoAtNet1(
+        num_classes=num_classes)
+    variables = coatnet.init(rng, jnp.ones([1, *dims]))
+    print(sum(p.size for p in jax.tree_leaves(variables["params"])))
+    """
+
+test_coatnet_size()
+
+
+def test_head_init(
+    features: int = 10,
+    bias: float = 0.
+) -> None:
+    rng = jax.random.PRNGKey(42)
+
+    dense = nn.Dense(
+        features=features,
+        kernel_init=nn.initializers.zeros,
+        bias_init=nn.initializers.constant(
+            bias
+        ), name="head")
     
-test_relativeselfattention()
+    x = jnp.ones([1, 10, 1])
+    variables = dense.init(rng, x)
+
+    assert (jnp.zeros(x.shape) == dense.apply(variables, x)).all()
+
+#test_head_init()
