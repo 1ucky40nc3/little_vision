@@ -1,5 +1,6 @@
 from ast import Call
 from curses import window
+import math
 from re import S
 from typing import Any
 from typing import Tuple
@@ -254,7 +255,7 @@ class PositionWiseMLP(nn.Module):
     def __call__(
         self, 
         x: jnp.ndarray, 
-        deterministic: bool = True
+        deterministic: bool = False
     ) -> jnp.ndarray:
         dense = partial(
             nn.Dense,
@@ -268,9 +269,9 @@ class PositionWiseMLP(nn.Module):
         *_, d = x.shape
         x = dense(features=self.mlp_dim or 4 * d)(x)
         x = self.act(x)
-        x = dropout()(x, deterministic)
+        x = dropout()(x, deterministic=deterministic)
         x = dense(features=d)(x)
-        x = dropout()(x, deterministic)
+        x = dropout()(x, deterministic=deterministic)
         
         return x
 
@@ -300,7 +301,6 @@ class TransformerEncoderBlock(nn.Module):
             num_heads=self.num_heads,
             dtype=self.dtype,
             dropout_rate=self.dropout,
-            deterministic=deterministic,
             kernel_init=self.kernel_init)
         dropout = partial(
             nn.Dropout,
@@ -312,11 +312,11 @@ class TransformerEncoderBlock(nn.Module):
             dtype=self.dtype)
         
         y = norm()(x)
-        y = attn()(y, deterministic)
-        y = dropout()(y, deterministic)
+        y = attn()(y, deterministic=deterministic)
+        y = dropout()(y, deterministic=deterministic)
         x += y
         y = norm()(x)
-        y = mlp()(y, deterministic)
+        y = mlp()(y, deterministic=deterministic)
         x += y
 
         return x
@@ -338,14 +338,14 @@ class TransformerEncoder(nn.Module):
     def __call__(
         self, 
         x: jnp.ndarray, 
-        train: bool = True
+        deterministic: bool = False
     ) -> jnp.ndarray:
         dropout = partial(
             nn.Dropout,
             rate=self.dropout)
 
         x = self.emb()(x)
-        x = dropout()(x, not train)
+        x = dropout()(x, deterministic=deterministic)
 
         for i in range(self.num_blocks):
             x = TransformerEncoderBlock(
@@ -354,7 +354,7 @@ class TransformerEncoder(nn.Module):
                 dropout=self.dropout,
                 attn_dropout=self.attn_dropout,
                 name=f"encoderblock_{i}",
-            )(x, not train)
+            )(x, deterministic=deterministic)
         x = self.norm(name="encoder_norm")(x)
 
         return x
@@ -377,7 +377,7 @@ class ViT(nn.Module):
     def __call__(
         self, 
         x: jnp.ndarray, 
-        train: bool = True
+        deterministic: bool = False
     ) -> jnp.ndarray:
         patches = (self.patch_size, self.patch_size)
         x = nn.Conv(
@@ -404,7 +404,8 @@ class ViT(nn.Module):
             num_heads=self.num_heads,
             mlp_dim=self.mlp_dim,
             dropout=self.dropout,
-            attn_dropout=self.attn_dropout)(x, train)
+            attn_dropout=self.attn_dropout
+        )(x, deterministic=deterministic)
 
         if self.num_classes:
             if self.classifier == "token":
@@ -450,10 +451,10 @@ class DropPath(nn.Module):
     def __call__(
         self, 
         x: jnp.ndarray, 
-        training: bool = False,
+        deterministic: bool = False,
         rng: jax.random.PRNGKey = None
     ) -> jnp.ndarray:
-        if not training or self.rate == 0.:
+        if deterministic or self.rate == 0.:
             return x
 
         if rng is None:
@@ -501,7 +502,7 @@ class MixerBlock(nn.Module):
     def __call__(
         self, 
         x: jnp.ndarray,
-        training: bool = False,
+        deterministic: bool = False,
         **kwargs
     ) -> jnp.ndarray:
         y = self.norm()(x)
@@ -514,7 +515,7 @@ class MixerBlock(nn.Module):
             y, "n d l -> n l d")
         y = DropPath(
             rate=self.drop_path
-        )(y, training)
+        )(y, deterministic=deterministic)
         x += y
         y = self.norm()(x)
         y = self.mlp(
@@ -522,7 +523,7 @@ class MixerBlock(nn.Module):
             name="channel_mixing")(y)
         y = DropPath(
             rate=self.drop_path
-        )(y, training)
+        )(y, deterministic=deterministic)
         return x + y
 
 
@@ -598,7 +599,7 @@ class CoAtNetStemBlock(nn.Module):
     act: Callable = nn.gelu
 
     @nn.compact
-    def __init__(
+    def __call__(
         self,
         x: jnp.ndarray,
         **kwargs
@@ -633,15 +634,15 @@ class MBConvBlock(nn.Module):
         x = nn.Conv(
             features=channels,
             kernel=(1, 1),
-            stride=(2, 2))(x)
+            strides=(2, 2))(x)
         x = nn.Conv(
             features=channels * self.expand_dims,
             kernel=(3, 3),
-            stride=(1, 1))(x)
+            strides=(1, 1))(x)
         x = nn.Conv(
             features=channels,
             kernel=(1, 1),
-            stride=(1, 1))(x)
+            strides=(1, 1))(x)
 
         return x
 
@@ -659,7 +660,7 @@ class SqueezeExcite(nn.Module):
         conv = partial(
             nn.Conv,
             kernel_size=(1, 1),
-            stride=1)
+            strides=1)
         c_current = x.shape[-1]
         c_squeeze = int(
             max(1, c_current * self.squeeze_ratio))
@@ -695,7 +696,7 @@ class CoAtNetConvBlock(nn.Module):
     def __call__(
         self,
         x: jnp.ndarray,
-        training: bool = False,
+        deterministic: bool = False,
         **kwargs
     ) -> jnp.ndarray:
         conv = partial(
@@ -730,15 +731,15 @@ class CoAtNetConvBlock(nn.Module):
         y = self.norm()(y)
         y = DropPath(
             rate=self.drop_path
-        )(y, training)
+        )(y, deterministic=deterministic)
 
         if x.shape != y.shape:
+            x = self.norm()(x)
             x = conv(
                 features=y.shape[-1],
                 kernel_size=(1, 1),
                 strides=self.strides,
                 name="conv_proj")(x)
-            x = self.norm()(x)
         
         return x + y
 
@@ -840,8 +841,9 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
     out_features: Optional[int] = None
     broadcast_dropout: bool = True
     dropout_rate: float = 0.
-    deterministic: Optional[bool] = None
+    deterministic: bool = False
     precision: nn.linear.PrecisionLike = None
+    kernel_init: Callable = nn.linear.default_kernel_init
     bias_init: Callable = nn.initializers.zeros
     use_bias: bool = True
     attention_fn: Callable = relative_dot_product_attention
@@ -853,7 +855,7 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
         inputs_q: jnp.ndarray,
         inputs_kv: jnp.ndarray,
         mask: Optional[jnp.ndarray] = None,
-        deterministic: Optional[bool] = None
+        deterministic: bool = False,
     ) -> jnp.ndarray:
         features = self.out_features or inputs_q.shape[-1]
         qkv_features = self.qkv_features or inputs_q.shape[-1]
@@ -867,6 +869,7 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
             dtype=self.dtype,
             param_dtype=self.param_dtype,
             features=(self.num_heads, head_dim),
+            kernel_init=self.kernel_init,
             bias_init=self.bias_init,
             use_bias=self.use_bias,
             precision=self.precision)
@@ -888,9 +891,11 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
         else:
             m_deterministic = True
 
+        size = int(math.sqrt(
+            inputs_q.shape[-2]))
         bias_shape = ((
-                (2 * self.image_size[0] - 1)
-                 * (2 * self.image_size[1] - 1)
+                (2 * size - 1)
+                 * (2 * size - 1)
             ), self.num_heads)
 
         relative_position_bias = self.param(
@@ -898,7 +903,7 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
             nn.initializers.normal(stddev=.02), 
             bias_shape)
         pos = relative_positions(
-            self.image_size)
+            (size, size))
         bias = relative_position_bias[pos]
         bias = einops.rearrange(
             bias, "a b n -> n a b")
@@ -917,6 +922,7 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
             dtype=self.dtype,
             precision=self.precision)
         # back to the original inputs dimensions
+        print("attn", x.shape)
         out = nn.DenseGeneral(
             features=features,
             axis=(-2, -1),
@@ -926,6 +932,7 @@ class RelativeMultiHeadDotProductAttention(nn.Module):
             param_dtype=self.param_dtype,
             precision=self.precision,
             name='out')(x)
+        print("attn out", x.shape)
         return out
 
 class RelativeSelfAttention(RelativeMultiHeadDotProductAttention):
@@ -934,7 +941,7 @@ class RelativeSelfAttention(RelativeMultiHeadDotProductAttention):
         self, 
         x: jnp.ndarray, 
         mask: Optional[jnp.ndarray] = None,
-        deterministic: Optional[bool] = None
+        deterministic: bool = True
     ) -> jnp.ndarray:
         return super().__call__(
             x, 
@@ -945,14 +952,13 @@ class RelativeSelfAttention(RelativeMultiHeadDotProductAttention):
 
 
 class CoAtNetTransformerBlock(nn.Module):
-    features: Optional[int] = None
-    do_pool: bool = False
+    features: int
+    strides: int = 2
     num_heads: int = 4
     dropout: float = 0.
     drop_path: float = 0.
-    to_tokens: bool = False
     norm: Module = nn.LayerNorm
-    attn: Module = nn.SelfAttention
+    attn: Module = RelativeSelfAttention
     mlp: Module = PositionWiseMLP
     kernel_init: Callable = nn.initializers.xavier_uniform()
     dtype: DType = jnp.float32
@@ -961,11 +967,9 @@ class CoAtNetTransformerBlock(nn.Module):
     def __call__(
         self, 
         x: jnp.ndarray, 
-        training: bool = True,
+        deterministic: bool = False,
         **kwargs
     ) -> jnp.ndarray:
-        # TODO: handle 'deterministic' vs 'training'
-        # TODO: debug how MetaFormer handles shortcuts
         norm = partial(
             self.norm,
             dtype=self.dtype)
@@ -974,7 +978,7 @@ class CoAtNetTransformerBlock(nn.Module):
             num_heads=self.num_heads,
             dtype=self.dtype,
             dropout_rate=self.dropout,
-            deterministic=training,
+            deterministic=deterministic,
             kernel_init=self.kernel_init)
         drop_path = partial(
             DropPath,
@@ -984,37 +988,32 @@ class CoAtNetTransformerBlock(nn.Module):
             mlp_dim=self.features,
             dropout=self.dropout,
             dtype=self.dtype)
-        
-        if self.to_tokens:
-            x = einops.rearrange(
-                x, "n h w c -> n (h w) c")
+        pool = partial(
+            nn.max_pool,
+            window_shape=(3, 3),
+            strides=(2, 2),
+            padding="SAME")
+        flatten = partial(
+            einops.rearrange,
+            pattern="n h w c -> n (h w) c")
 
         y = norm()(x)
-        if self.do_pool:
-            y = nn.max_pool(
-                y,
-                window_shape=(3, 3),
-                strides=(2, 2),
-                padding="SAME")
-            y = einops.rearrange(
-                y, "n h w c -> n (h w) c")
+        if self.strides != 1:
+            y = pool(y)
+            y = flatten(y)
+            """y = nn.DenseGeneral(
 
-            x = nn.Conv(
-                features=self.features,
-                kernel_size=(3, 3),
-                strides=(2, 2),
-                name="proj_conv")(x)
-            x = self.norm(
-                name="proj_norm")(x)
-            x = einops.rearrange(
-                x, "n h w c -> n (h w) c")
+            )"""
 
-        y = attn()(y, training)
-        y = drop_path()(y, training)
+            x = pool(x)
+            x = flatten(x)
+
+        y = attn()(y, deterministic=deterministic)
+        y = drop_path()(y, deterministic=deterministic)
         x += y
         y = norm()(x)
-        y = mlp()(y, training)
-        y = drop_path()(y, training)
+        y = mlp()(y, deterministic=deterministic)
+        y = drop_path()(y, deterministic=deterministic)
         x += y
 
         return x
@@ -1027,16 +1026,18 @@ class CoAtNet(nn.Module):
     hidden_dims: Tuple[int] = (64, 96, 192, 384, 768)
     dropout: float = 0.
     drop_path: float = 0.
-    num_heads: int = 6
+    num_heads: int = 32
     head_bias: float = 0.
 
     @nn.compact
     def __call__(
         self,
         x: jnp.ndarray,
-        training: bool = False,
+        deterministic: bool = False,
         **kwargs
     ) -> jnp.ndarray:
+        _, height, width, _ = x.shape
+
         for i, (l, h) in enumerate(
             zip(self.num_stages, self.hidden_dims)):
             for j in range(l):
@@ -1047,25 +1048,30 @@ class CoAtNet(nn.Module):
                         features=h,
                         strides=s,
                         name=f"S{i}_L{j}"
-                    )(x, training)
+                    )(x, deterministic=deterministic)
                 elif i in (1, 2):
                     x = CoAtNetConvBlock(
                         features=h,
                         strides=s,
                         drop_path=self.drop_path,
                         name=f"S{i}_L{j}"
-                    )(x, training)
+                    )(x, deterministic=deterministic)
                 elif i in (3, 4):
-                    to_tokens = i == 3 and j == 0
+                    if i > 3 and j == 0:
+                        downscale = 2**i
+                        x = einops.rearrange(
+                            x, 
+                            "n (h w) d -> n h w d",
+                            h=height // downscale,
+                            w=width // downscale)
                     x = CoAtNetTransformerBlock(
                         features=h,
                         strides=s,
                         num_heads=self.num_heads,
                         dropout=self.dropout,
                         drop_path=self.drop_path,
-                        to_tokens=to_tokens,
                         name=f"S{i}_L{j}"
-                    )(x, training)
+                    )(x, deterministic=deterministic)
 
         x = einops.reduce(
             x, "n l d -> n d", "mean")  
@@ -1074,6 +1080,31 @@ class CoAtNet(nn.Module):
             kernel_init=nn.initializers.zeros,
             bias_init=nn.initializers.constant(
                 self.head_bias
-            ), name="head")(x) # TODO: check if initializer works
+            ), name="head")(x)
         
         return x
+
+"""
+    num_classes: int
+    num_stages: Tuple[int] = (1, 1, 1, 1, 1)
+    strides: int = 2
+    hidden_dims: Tuple[int] = (64, 96, 192, 384, 768)
+    dropout: float = 0.
+    drop_path: float = 0.
+    num_heads: int = 4
+    head_bias: float = 0.
+"""
+# paper: 25 m
+CoAtNet0 = partial(
+    CoAtNet,
+    num_stages=(2, 2, 3, 5, 2),
+    hidden_dims=(64, 96, 192, 384, 768),
+    num_heads=32
+)
+# paper: 42 m
+# 4.394.862
+CoAtNet1 = partial(
+    CoAtNet,
+    num_stages=(2, 2, 6, 14, 2),
+    hidden_dims=(64, 96, 192, 384, 768)
+)
