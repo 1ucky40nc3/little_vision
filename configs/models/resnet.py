@@ -25,7 +25,7 @@ def optimizer(
     cfg.schedule_config = dict(
         base_lr=0.1,
         min_lr=1e-5,
-        num_steps=config.epoch_steps)
+        num_steps=config.max_train_steps)
 
     return cfg
 
