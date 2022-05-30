@@ -160,7 +160,7 @@ def initialize(
     cls = getattr(little_models, config.model.name)
     model = cls(**config.model.config)
     images = jnp.ones([1, *config.dataset.image_dims])
-    variables = model.init(rng, images)
+    variables = model.init(rng, images, deterministic=True)
 
     tx = little_optimizers.tx(config.optimizer)
 
@@ -187,7 +187,7 @@ def eval_step(
         logits = state.apply_fn({
             "params": params,
             "batch_stats": state.batch_stats
-        }, images, train=False)
+        }, images, deterministic=True)
         loss = getattr(little_losses, config.loss.name)(
             logits, labels, **config.loss.config)
         return loss, logits
@@ -240,7 +240,8 @@ def train_step(
             }, 
             images, 
             mutable=["batch_stats"], 
-            rngs=dict(dropout=rngs))
+            rngs=dict(dropout=rngs),
+            deterministic=False)
         loss = getattr(little_losses, config.loss.name)(
             logits, labels, **config.loss.config)
         return loss, (logits, mutvars)
@@ -263,8 +264,10 @@ def train(
 
     key = jax.random.PRNGKey(config.random_seed)
     key, subkey = jax.random.split(key)
+    print("i")
 
     state = initialize(subkey, config)
+    #print(state.opt_state)
     if config.resume:
         state = resume(state, config)
     
@@ -275,6 +278,7 @@ def train(
     valid_ds = load_ds(train=False, config=config)
 
     keys = jax.random.split(key, jax.local_device_count())
+    print("wow")
 
     tloss, tlogits, tlabels, = [], [], []
     for step, (images, labels) in zip(

@@ -10,7 +10,7 @@ import flax.linen as nn
 
 import einops
 
-import layers
+import models.layers as layers
 
 
 DType = Any
@@ -78,13 +78,15 @@ class MLPMixer(nn.Module):
     hidden_dim: int = 64
     tokens_mlp_dim: int = 256
     channels_mlp_dim: int = 256
+    drop_path: float = 0.
     block: Module = MixerBlock
     norm: Module = nn.LayerNorm
 
     @nn.compact
     def __call__(
         self, 
-        x: jnp.ndarray, 
+        x: jnp.ndarray,
+        deterministic: bool = True,
         **kwargs
     ) -> jnp.ndarray:
         patches = (self.patch_size, self.patch_size)
@@ -101,8 +103,10 @@ class MLPMixer(nn.Module):
             x = self.block(
                 self.tokens_mlp_dim,
                 self.channels_mlp_dim,
+                drop_path=self.drop_path,
                 norm=self.norm,
-                name=f"mixer_block_{i}")(x)
+                name=f"mixer_block_{i}"
+            )(x, deterministic=deterministic)
         x = self.norm(name="pre_head_norm")(x)
 
         if self.num_classes:

@@ -34,7 +34,7 @@ def model(
     config: mlc.ConfigDict
 ) -> mlc.ConfigDict:
     cfg = mlc.ConfigDict()
-    cfg.name = "ResNet"
+    cfg.name = config.model_name
     cfg.config = dict(
         num_classes=config.dataset.num_classes)
     

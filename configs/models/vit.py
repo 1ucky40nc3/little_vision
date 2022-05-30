@@ -1,4 +1,5 @@
 import ml_collections as mlc
+from torch import dropout
 
 
 def preprocessing(
@@ -34,8 +35,9 @@ def model(
     config: mlc.ConfigDict
 ) -> mlc.ConfigDict:
     cfg = mlc.ConfigDict()
-    cfg.name = "ViT"
+    cfg.name = config.model_name
     cfg.config = dict(
-        num_classes=config.dataset.num_classes)
+        num_classes=config.dataset.num_classes,
+        dropout=0.1)
 
     return cfg

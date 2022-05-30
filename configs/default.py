@@ -6,7 +6,9 @@ from configs import datasets
 from configs.utils import set
 
 
-def get_config() -> mlc.FrozenConfigDict:
+def get_config(
+    dataset: str = "mnist"
+) -> mlc.FrozenConfigDict:
     """Basic config for the MNIST example."""
     config = mlc.ConfigDict()
 
@@ -19,7 +21,7 @@ def get_config() -> mlc.FrozenConfigDict:
     config.resume = ""
     config.run_id = ""
 
-    config.dataset = datasets.mnist.get_config()
+    config.dataset = getattr(datasets, dataset).get_config()
     config.dataset.batch_size = 512
     config.dataset.num_workers = 0
     config.dataset.root = "/tmp"

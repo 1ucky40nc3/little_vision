@@ -1,8 +1,15 @@
 from . import cnn
+from .cnn import CNN
 from . import resnet
+from .resnet import ResNet18
+from .resnet import ResNet34
 from . import vit
+from .vit import ViTSmall
+from .vit import ViTBase
 from . import coatnet
 from . import mlpmixer
+from .mlpmixer import MLPMixerS
+from .mlpmixer import MLPMixerB
 from . import layers
 
 """Note:

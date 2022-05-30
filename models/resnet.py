@@ -150,11 +150,11 @@ class ResNet(nn.Module):
         return x
 
 ResNet18 = ResNet
-# params: 21.508.004
+# params: 21969704
 ResNet34 = partial(
     ResNet,
     stage_sizes=(3, 4, 6, 3))
-# params: 23.712.932
+# params: 25557032
 ResNet50 = partial(
     ResNet,
     stage_sizes=(3, 4, 6, 3),

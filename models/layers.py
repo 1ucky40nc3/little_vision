@@ -18,14 +18,14 @@ class DropPath(nn.Module):
         if deterministic or self.rate == 0.:
             return x
 
-        if rng is None:
-            rng = self.make_rng('dropout')
+        rng = self.make_rng('dropout')
+        print("drop_path", x.shape)
 
         keep_prob = 1. - self.rate
         mask = jax.random.bernoulli(
             key=rng, 
             p=keep_prob, 
-            shape=(x.shape[0], 1, 1, 1))
+            shape=(x.shape[0], 1, 1))
         mask = jnp.broadcast_to(
             mask, x.shape)
         return jax.lax.select(

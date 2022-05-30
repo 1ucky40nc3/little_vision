@@ -14,7 +14,7 @@ import flax.linen as nn
 
 import einops
 
-import layers
+import models.layers
 
 
 DType = Any

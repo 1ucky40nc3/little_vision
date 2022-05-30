@@ -7,19 +7,19 @@ from configs.utils import set
 
 
 def get_config() -> mlc.FrozenConfigDict:
-    """Basic config for the MNIST example."""
+    """Basic config for the CIFAR-100 example."""
     config = mlc.ConfigDict()
 
     config.project = "little_vision"
-    config.name = "MNIST example"
+    config.name = "CIFAR-100 example"
     config.tags = ("computer-vision", "classification")
-    config.notes = "Train a classifier on the MNIST dataset."
+    config.notes = "Train a classifier on the CIFAR-100 dataset."
     config.do_train = True
 
     config.resume = ""
     config.run_id = ""
 
-    config.dataset = datasets.mnist.get_config()
+    config.dataset = datasets.cifar100.get_config()
     config.dataset.batch_size = 512
     config.dataset.num_workers = 0
     config.dataset.root = "/tmp"
@@ -39,8 +39,8 @@ def get_config() -> mlc.FrozenConfigDict:
     config.loss.config = dict(
         num_classes=config.dataset.num_classes)
 
-    config.model_name = "CNN"
-    config.model = models.cnn.model(config)
+    config.model_name = "MLPMixerS"
+    config.model = models.mlpmixer.model(config)
     config.optimizer = models.mlpmixer.optimizer(config)
     config.transform = models.mlpmixer.preprocessing(config)
     

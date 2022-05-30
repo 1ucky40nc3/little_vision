@@ -9,6 +9,8 @@ import jax.numpy as jnp
 
 from sklearn import metrics
 
+import einops
+
 
 def topk_acc(
     logits: jnp.ndarray,
@@ -17,6 +19,11 @@ def topk_acc(
 ) -> jnp.ndarray:
     preds = jnp.argsort(logits)
     k_preds = preds[:, -k:]
+    
+    if labels.ndim > 1:
+        labels = jnp.argmax(
+            labels, axis=-1)
+
     v_isin = jax.vmap(jnp.isin)
     return v_isin(k_preds, labels).any(axis=-1)
 
@@ -32,7 +39,15 @@ def precision_recall_f1(
         logits, axis=-1
     ).reshape(-1)
 
+    print("labels m", labels.shape)
+    if labels.ndim > 1:
+        labels = jnp.argmax(
+            labels, axis=-1)
+
     classes = list(range(logits.shape[-1]))
+    print(labels.shape, preds.shape, classes)
+    print(labels)
+    print(preds)
     precision, recall, f1, _ = (
         metrics.precision_recall_fscore_support(
         labels, preds, labels=classes, average="macro"))
@@ -45,13 +60,17 @@ def calc(
     logits: jnp.ndarray,
     labels: jnp.ndarray
 ) -> Dict[str, float]:
+    print(logits[0].shape, labels[0].shape)
     loss = jnp.stack(loss)
-    logits, labels = map(
-        jnp.column_stack, 
-        (logits, labels))
-    loss, logits, labels = map(
-        jnp.squeeze,
+    logits = jnp.column_stack(logits)
+    labels = jnp.column_stack(labels)
+    print("stack", loss.shape, logits.shape, labels.shape)
+
+    loss, logits, labels = jax.tree_map(
+        partial(einops.rearrange, pattern="d n ... -> (d n) ..."),
         (loss, logits, labels))
+
+    print("metrics", logits.shape, labels.shape)
 
     top1 = top1_acc(logits, labels)
     top5 = top5_acc(logits, labels)
@@ -70,3 +89,36 @@ def calc(
         recall=rec,
         f1=f1
     )
+
+
+a = jnp.ones((1, 512, 10))
+b = jnp.ones((1, 200, 10))
+
+print(jnp.column_stack([a, b]).shape)
+
+
+
+x = jnp.array([0, 0, 1])
+x_ = jnp.array(2)
+y = jnp.array([0, 1, 0])
+n = 2
+d = 1
+x = jnp.stack([x]*n)
+x = jnp.stack([x]*d)
+print("x", x.shape)
+
+x_ = jnp.stack([x_]*n)
+x_ = jnp.stack([x_]*d)
+print("x_", x_.shape)
+
+y = jnp.stack([y]*n)
+y = jnp.stack([y]*d)
+
+l = jnp.ones([1])
+b = 10
+print("true")
+print(calc([l]*b, [x]*b, [x]*b))
+print("eieieieieiei")
+print(calc([l]*b, [x]*b, [x_]*b))
+print("false")
+print(calc([l]*b, [x]*b, [y]*b))

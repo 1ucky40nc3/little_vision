@@ -1,11 +1,15 @@
+from typing import Any
 from typing import List
 from typing import Union
 from typing import Iterator
 from typing import Callable
+from typing import Sequence
 
 from functools import partial
 
 from itertools import cycle
+
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -32,7 +36,7 @@ ConfigDict = Union[mlc.ConfigDict, mlc.FrozenConfigDict]
 
 
 def to_jax_img(image: torch.Tensor) -> torch.Tensor:
-    return einops.rearrange(image, "c h w -> h w c")
+    return einops.rearrange(image, "n c h w -> n h w c")
 
 transforms.ToJax = partial(transforms.Lambda, lambd=to_jax_img)
 
@@ -60,7 +64,7 @@ def transform(
             padding=config.transform.crop_padding),
         transforms.ToTensor(),
         *t,
-        transforms.ToJax(),
+        #transforms.ToJax(),
     ])
 
 
@@ -172,23 +176,41 @@ def prepare(
     iterator: Iterator, 
     config: ConfigDict
 ) -> Iterator:
+    is_list = lambda x: isinstance(x, list)
+    print(next(iter((type(b) for b in iterator))))
+
     if config.transform.mixup:
-        mixup_fn = Mixup(
-            config.transform.mixup_config)
+        mixup = Mixup(
+            **config.transform.mixup_config)
+        mixup_fn = lambda t: mixup(*t)
+
         iterator = (
-            jax.tree_map(
-                lambda t: mixup_fn(t), b
-            ) for b in iterator)
+             jax.tree_map(
+                mixup_fn,
+                b,
+                is_leaf=is_list)
+             for b in iterator)
 
     iterator = (
         jax.tree_map(
-            lambda t: t.numpy(), b
-        ) for b in iterator)
+            lambda t: t.numpy(), b)
+        for b in iterator)
+
+    to_jax = (
+        lambda t: t 
+        if t.ndim != 4 
+        else to_jax_img(t))
     iterator = (
         jax.tree_map(
-            shard, b
-        ) for b in iterator)
+            to_jax, b) 
+        for b in iterator)
+
+    iterator = (
+        jax.tree_map(
+            shard, b) 
+        for b in iterator)
+    
     iterator = jax_utils.prefetch_to_device(
         iterator, config.dataset.prefetch_size)
-
+        
     return iterator

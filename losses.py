@@ -10,6 +10,8 @@ def softmax_cross_entropy(
     num_classes: int,
     **kwargs
 ) -> jnp.ndarray:
-    labels = jax.nn.one_hot(labels, num_classes)
+    if labels.ndim == 1:
+        labels = jax.nn.one_hot(labels, num_classes)
+    print(logits.shape, labels.shape)
     loss = optax.softmax_cross_entropy(logits, labels)
     return loss.mean()
