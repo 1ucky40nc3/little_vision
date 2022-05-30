@@ -25,7 +25,11 @@ class ResNetBlock(nn.Module):
     strides: Union[int, Tuple[int, int]] = 1
 
     @nn.compact
-    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+    def __call__(
+        self, 
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
         conv = partial(
             self.conv, 
             features=self.features,
@@ -57,7 +61,11 @@ class BottleneckResNetBlock(nn.Module):
     strides: Union[int, Tuple[int, int]] = 1
 
     @nn.compact
-    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+    def __call__(
+        self, 
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
         y = self.conv(
             features=self.features, 
             kernel_size=(1, 1))(x)
@@ -110,15 +118,16 @@ class ResNet(nn.Module):
     @nn.compact
     def __call__(
         self, 
-        x: jnp.ndarray, 
-        train: bool = True
+        x: jnp.ndarray,
+        deterministic: bool = False, 
+        **kwargs
     ) -> jnp.ndarray:
         conv = partial(
             self.conv,
             dtype=self.dtype)
         norm = partial(
             self.norm,
-            use_running_average=not train,
+            use_running_average=deterministic,
             dtype=self.dtype)
 
         x = conv(
