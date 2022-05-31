@@ -38,8 +38,6 @@ ConfigDict = Union[mlc.ConfigDict, mlc.FrozenConfigDict]
 def to_jax_img(image: torch.Tensor) -> torch.Tensor:
     return einops.rearrange(image, "n c h w -> n h w c")
 
-transforms.ToJax = partial(transforms.Lambda, lambd=to_jax_img)
-
 
 def randaugment(
     config: ConfigDict
@@ -63,8 +61,7 @@ def transform(
             size=config.dataset.image_dims[:-1],
             padding=config.transform.crop_padding),
         transforms.ToTensor(),
-        *t,
-        #transforms.ToJax(),
+        *t
     ])
 
 
@@ -177,7 +174,6 @@ def prepare(
     config: ConfigDict
 ) -> Iterator:
     is_list = lambda x: isinstance(x, list)
-    print(next(iter((type(b) for b in iterator))))
 
     if config.transform.mixup:
         mixup = Mixup(
@@ -212,5 +208,5 @@ def prepare(
     
     iterator = jax_utils.prefetch_to_device(
         iterator, config.dataset.prefetch_size)
-        
+
     return iterator
