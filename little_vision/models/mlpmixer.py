@@ -10,7 +10,7 @@ import flax.linen as nn
 
 import einops
 
-import models.layers as layers
+from little_vision.models import layers
 
 
 DType = Any
