@@ -14,7 +14,7 @@ import flax.linen as nn
 
 import einops
 
-import models.layers
+from little_vision.models import layers
 
 
 DType = Any
@@ -61,25 +61,25 @@ class SqueezeExcite(nn.Module):
     ) -> jnp.ndarray:
         conv = partial(
             nn.Conv,
-            kernel_size=(1, 1),
-            strides=1)
+            kernel_size=(1, 1))
+
         c_current = x.shape[-1]
         c_squeeze = int(
             max(1, c_current * self.squeeze_ratio))
-        
-        x = jnp.mean(
+
+        x_se = jnp.mean(
             x, 
             axis=(1, 2),
             dtype=jnp.float32,
             keepdims=True)
-        x = conv(
+        x_se = conv(
             features=c_squeeze,
-            name="squeeze_reduce")(x)
-        x = self.act(x)
-        x = conv(
+            name="squeeze_reduce")(x_se)
+        x_se = self.act(x_se)
+        x_se = conv(
             features=c_current,
-            name="squeeze_expand")(x)
-        x = nn.sigmoid(x)
+            name="squeeze_expand")(x_se)
+        x = x * nn.sigmoid(x_se)
 
         return x
 
@@ -298,10 +298,10 @@ class CoAtNet(nn.Module):
             h=int(math.sqrt(x.shape[-2])),
             w=int(math.sqrt(x.shape[-2])))
         print(x.shape)
-        for i in range(self.num_s3):
+        for i in range(self.num_s4):
             strides = 1 if i else 2
             x = CoAtNetTransformerBlock(
-                features=self.dim_s3,
+                features=self.dim_s4,
                 strides=strides,
                 name=f"s4_l{i}"
             )(x, deterministic=deterministic)
