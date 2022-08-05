@@ -21,7 +21,6 @@ import torchvision.transforms as transforms
 from timm.data.mixup import Mixup
 from timm.data.auto_augment import rand_augment_transform
 
-
 import jax
 import jax.numpy as jnp
 
@@ -30,6 +29,8 @@ from flax import jax_utils
 import ml_collections as mlc
 
 import einops
+
+from little_vision.data.transforms import transform
 
 
 ConfigDict = Union[mlc.ConfigDict, mlc.FrozenConfigDict]
