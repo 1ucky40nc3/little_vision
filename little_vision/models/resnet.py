@@ -5,7 +5,6 @@ from typing import Callable
 
 from functools import partial
 
-
 import jax.numpy as jnp
 
 import flax.linen as nn
@@ -15,6 +14,7 @@ import einops
 
 DType = Any
 Module = Union[partial, nn.Module]
+
 
 class ResNetBlock(nn.Module):
     features: int
@@ -158,17 +158,14 @@ class ResNet(nn.Module):
         
         return x
 
+
 ResNet18 = ResNet
-# params: 21969704
+
 ResNet34 = partial(
     ResNet,
     stage_sizes=(3, 4, 6, 3))
-# params: 25557032
+
 ResNet50 = partial(
     ResNet,
     stage_sizes=(3, 4, 6, 3),
-    block_class=BottleneckResNetBlock)
-ResNet101 = partial(
-    ResNet,
-    stage_sizes=(3, 4, 23, 3),
     block_class=BottleneckResNetBlock)
