@@ -1,5 +1,4 @@
-
-import configs
+from little_vision import configs
 from little_vision.data import datasets
 
 
