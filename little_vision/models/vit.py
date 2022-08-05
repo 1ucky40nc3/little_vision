@@ -109,7 +109,6 @@ class TransformerEncoderBlock(nn.Module):
         return x
 
 
-
 class TransformerEncoder(nn.Module):
     num_blocks: int = 1
     num_heads: int = 8
@@ -211,7 +210,6 @@ class ViT(nn.Module):
         return x
 
 
-# params: 25.766.500
 ViTSmall = partial(
     ViT,
     patch_size=16,
@@ -221,7 +219,6 @@ ViTSmall = partial(
     num_heads=8)
 
 
-# params: 85.875.556
 ViTBase = partial(
     ViT,
     patch_size=16,
