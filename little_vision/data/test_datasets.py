@@ -1,9 +1,9 @@
-from little_vision import configs
+from little_vision.configs import default
 from little_vision.data import datasets
 
 
 def test_mnist():
-    config = configs.default.get_config()
+    config = default.get_config()
     print(config)
     ds = datasets.mnist(train=True, config=config)
     it = datasets.prepare(ds, config)

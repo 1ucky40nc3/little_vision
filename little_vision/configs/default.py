@@ -1,9 +1,9 @@
 import ml_collections as mlc
 
-from configs import models
-from configs import datasets
+from little_vision.configs import models
+from little_vision.configs import datasets
 
-from configs.utils import set
+from little_vision.configs.utils import set
 
 
 def get_config(
