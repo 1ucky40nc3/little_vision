@@ -13,8 +13,6 @@ def test_mnist():
     assert x.shape == (1, 512, 28, 28, 1)
     assert y.shape == (1, 512)
 
-test_mnist()
-
 
 def test_mnist_mlpmixer():
     config = configs.default.get_config()
@@ -24,8 +22,6 @@ def test_mnist_mlpmixer():
     x, y = next(iter(it))
     assert x.shape == (1, 512, 28, 28, 1)
     assert y.shape == (1, 512, 10)
-
-test_mnist_mlpmixer()
 
 
 def test_cifar100():
@@ -38,5 +34,3 @@ def test_cifar100():
     print(x.shape)
     assert x.shape == (1, 512, 32, 32, 3)
     assert y.shape == (1, 512)
-
-test_cifar100()
