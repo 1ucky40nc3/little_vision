@@ -7,7 +7,7 @@ import jax.numpy as jnp
 
 import flax.linen as nn
 
-import resnet
+from little_vision.models import resnet
 
 
 def test_resnetblock(
@@ -24,10 +24,12 @@ def test_resnetblock(
     variables = block.init(rng, jnp.ones([1, *dims]))
     assert "params" in variables and "batch_stats" in variables
 
-    out = block.apply(variables, jnp.ones([10, *dims]))
-    assert out.shape == (10, *dims[:-1], features)
-
-test_resnetblock()
+    out = block.apply(
+        variables, 
+        jnp.ones([10, *dims]), 
+        mutable=["batch_stats"])
+    assert out[0].shape == (10, *dims[:-1], features)
+    assert "batch_stats" in out[1]
 
 
 def test_bottleneckresnetblock(
@@ -44,10 +46,12 @@ def test_bottleneckresnetblock(
     variables = block.init(rng, jnp.ones([1, *dims]))
     assert "params" in variables and "batch_stats" in variables
 
-    out = block.apply(variables, jnp.ones([10, *dims]))
-    assert out.shape == (10, *dims[:-1], features * 4)
-
-test_bottleneckresnetblock()
+    out = block.apply(
+        variables, 
+        jnp.ones([10, *dims]),
+        mutable=["batch_stats"])
+    assert out[0].shape == (10, *dims[:-1], features * 4)
+    assert "batch_stats" in out[1]
 
 
 def test_resnet(
@@ -68,34 +72,32 @@ def test_resnet(
     out = model.apply(
         variables, 
         sample, 
-        train=False)
-    assert out.shape == (10, model.num_classes)
-
-    out, mutated_vars = model.apply(
-        variables, 
-        sample, 
-        train=True, 
+        train=False,
         mutable=["batch_stats"])
-    assert out.shape == (10, model.num_classes)
-    assert "batch_stats" in mutated_vars.keys()
-
-test_resnet()
+    assert out[0].shape == (10, model.num_classes)
+    assert "batch_stats" in out[1]
 
 
-def test_resnet34_size(
+def test_resnet_sizes(
     num_classes: int = 1000,
     dims: Tuple[int] = (224, 224, 3)
 ) -> None:
     rng = jax.random.PRNGKey(42)
 
+    model = resnet.ResNet18(
+        num_classes=num_classes)
+    variables = model.init(rng, jnp.ones([1, *dims]))
+    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
+    assert num > 11_000_000
+
     model = resnet.ResNet34(
         num_classes=num_classes)
     variables = model.init(rng, jnp.ones([1, *dims]))
-    print(sum(p.size for p in jax.tree_leaves(variables["params"])))
+    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
+    assert num > 21_000_000
 
     model = resnet.ResNet50(
         num_classes=num_classes)
     variables = model.init(rng, jnp.ones([1, *dims]))
-    print(sum(p.size for p in jax.tree_leaves(variables["params"])))
-
-test_resnet34_size()
+    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
+    assert num > 25_000_000
