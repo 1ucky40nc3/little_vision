@@ -97,7 +97,7 @@ class CoAtNetConvBlock(nn.Module):
     def __call__(
         self,
         x: jnp.ndarray,
-        deterministic: bool = False,
+        deterministic: bool = True,
         **kwargs
     ) -> jnp.ndarray:
         conv = partial(
@@ -157,7 +157,7 @@ class PositionWiseMLP(nn.Module):
     def __call__(
         self, 
         x: jnp.ndarray, 
-        deterministic: bool = False
+        deterministic: bool = True
     ) -> jnp.ndarray:
         dense = partial(
             nn.Dense,
@@ -193,7 +193,7 @@ class CoAtNetTransformerBlock(nn.Module):
     def __call__(
         self, 
         x: jnp.ndarray, 
-        deterministic: bool = False,
+        deterministic: bool = True,
         **kwargs
     ) -> jnp.ndarray:
         norm = partial(
@@ -243,17 +243,8 @@ class CoAtNetTransformerBlock(nn.Module):
 
 class CoAtNet(nn.Module):
     num_classes: int
-    num_s0: int = 2
-    dim_s0: int = 64
-    num_s1: int = 2
-    dim_s1: int = 96
-    num_s2: int = 3
-    dim_s2: int = 192
-    num_s3: int = 5
-    dim_s3: int = 384
-    num_s4: int = 2
-    dim_s4: int = 768
-
+    layers: Tuple[int] = (2, 2, 3, 5, 2)
+    features: Tuple[int] = (64, 96, 192, 384, 768)
     head_bias: float = 0.
 
     @nn.compact
@@ -262,6 +253,37 @@ class CoAtNet(nn.Module):
         x: jnp.ndarray,
         deterministic: bool = True
     ) -> jnp.ndarray:
+        for i, (l, f) in enumerate(zip(self.layers, self.features)):
+            if i < 3:
+                if i == 0:
+                    block = CoAtNetStemBlock
+                else:
+                    block = CoAtNetConvBlock
+                
+                for j in range(l):
+                    strides = 1 if j else 2
+                    x = block(
+                        features=f,
+                        strides=strides,
+                        name=f"s{i}_l{j}"
+                    )(x, deterministic=deterministic)
+            else:
+                for j in range(l):
+                    strides = 1 if j else 2
+                    x = CoAtNetTransformerBlock(
+                        features=f,
+                        strides=strides,
+                        name=f"s{i}_l{j}"
+                    )(x, deterministic=deterministic)
+                if i < len(self.layers) - 1:
+                    x = einops.rearrange(
+                        x, 
+                        "n (h w) d -> n h w d",
+                        h=int(math.sqrt(x.shape[-2])),
+                        w=int(math.sqrt(x.shape[-2])))                
+
+
+        """
         for i in range(self.num_s0):
             strides = 1 if i else 2
             x = CoAtNetStemBlock(
@@ -305,6 +327,7 @@ class CoAtNet(nn.Module):
                 strides=strides,
                 name=f"s4_l{i}"
             )(x, deterministic=deterministic)
+        """
 
         x = einops.reduce(
             x, "n l d -> n d", "mean")
