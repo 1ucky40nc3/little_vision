@@ -19,5 +19,3 @@ To resume a run:
 ```
 python3 train.py --config.run_id="$run_id" --config.resume="must"
 ```
-
-

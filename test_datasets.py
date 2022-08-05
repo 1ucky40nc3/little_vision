@@ -1,6 +1,6 @@
 
 import configs
-import datasets
+import data.datasets as datasets
 
 
 def test_mnist():

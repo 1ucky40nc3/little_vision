@@ -38,7 +38,7 @@ import models as little_models
 import optimizers as little_optimizers
 import losses as little_losses
 import metrics as little_metrics
-import datasets as little_datasets
+import data.datasets as little_datasets
 
 
 ConfigDict = Union[mlc.ConfigDict, mlc.FrozenConfigDict]
