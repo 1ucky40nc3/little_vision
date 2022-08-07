@@ -2,18 +2,20 @@ from typing import Any
 from typing import Tuple
 from typing import Union
 from typing import Callable
-from typing import Optional
 
 from functools import partial
 
-import math
+import numpy as np
 
+import jax
 import jax.numpy as jnp
 
 import flax.linen as nn
 
 import einops
 
+from little_vision.models import resnet
+from little_vision.models import vit
 from little_vision.models import layers
 
 
@@ -21,77 +23,50 @@ DType = Any
 Module = Union[partial, nn.Module]
 
 
-class CoAtNetStemBlock(nn.Module):
+def global_avg_pool(
+    x: jnp.ndarray
+) -> jnp.ndarray:
+    return jnp.mean(
+        x, axis=(1, 2), keepdims=True)
+
+
+class SqueezeExcitationBlock(nn.Module):
+    se_rate: int = 0.25
+    pool: Callable = global_avg_pool
+    conv: Module = partial(
+        nn.Conv,
+        kernel_size=(1, 1),
+        strides=1,
+        use_bias=True)
+
+    @nn.compact
+    def __call__(
+        self,
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
+        reduced = int(x.shape[-1] * self.se_rate)
+        
+        y = self.pool(x)
+        y = self.conv(
+            features=reduced)(y)
+        y = nn.relu(y)
+        y = self.conv(
+            features=x.shape[-1])(y)
+        y = nn.sigmoid(y)
+
+        return x * y 
+
+
+class MBConvBlock(nn.Module):
     features: int = 64
+    exp_rate: int = 4
     kernel_size: Tuple[int] = (3, 3)
-    strides: Tuple[int] = (2, 2)
-    norm: Module = nn.LayerNorm
-    act: Callable = nn.gelu
-
-    @nn.compact
-    def __call__(
-        self,
-        x: jnp.ndarray,
-        **kwargs
-    ) -> jnp.ndarray:
-        conv = partial(
-            nn.Conv,
-            features=self.features,
-            kernel_size=self.kernel_size)
-        
-        x = self.norm()(x)
-        x = conv(
-            strides=self.strides)(x)
-        x = self.act(x)
-        x = self.norm()(x)
-        x = conv()(x)
-        
-        return x
-
-
-class SqueezeExcite(nn.Module):
-    squeeze_ratio: float = 0.25
-    act: Module = nn.gelu
-
-    @nn.compact
-    def __call__(
-        self,
-        x: jnp.ndarray,
-        **kwargs
-    ) -> jnp.ndarray:
-        conv = partial(
-            nn.Conv,
-            kernel_size=(1, 1))
-
-        c_current = x.shape[-1]
-        c_squeeze = int(
-            max(1, c_current * self.squeeze_ratio))
-
-        x_se = jnp.mean(
-            x, 
-            axis=(1, 2),
-            dtype=jnp.float32,
-            keepdims=True)
-        x_se = conv(
-            features=c_squeeze,
-            name="squeeze_reduce")(x_se)
-        x_se = self.act(x_se)
-        x_se = conv(
-            features=c_current,
-            name="squeeze_expand")(x_se)
-        x = x * nn.sigmoid(x_se)
-
-        return x
-
-
-class CoAtNetConvBlock(nn.Module):
-    features: int
-    strides: int = 2
-    expand_factor: int = 4
-    squeeze_ratio: float = 0.25
-    drop_path: float = 0.
-    norm: Module = nn.LayerNorm
-    act: Module = nn.gelu
+    strides: int = 1
+    se_rate: float = 0.25
+    norm: Module = nn.BatchNorm
+    act: Callable = nn.swish
+    drop_path_rate: float = 0.
 
     @nn.compact
     def __call__(
@@ -100,346 +75,189 @@ class CoAtNetConvBlock(nn.Module):
         deterministic: bool = True,
         **kwargs
     ) -> jnp.ndarray:
+        expansion = x.shape[-1] * self.exp_rate
         conv = partial(
             nn.Conv,
-            use_bias=False)
-        expand = int(
-            self.features * self.expand_factor)
-
-        y = conv(
-            features=expand,
             kernel_size=(1, 1),
-            strides=self.strides,
-            name="conv_expand")(x)
-        y = self.norm()(y)
-        y = self.act(y)
+            use_bias=False)
+        
+        y = self.norm(
+            use_running_average=deterministic)(x)
+        y = nn.swish(y)
         y = conv(
-            features=expand,
+            features=expansion,
+            strides=self.strides,
+            name="expansion")(y)
+
+        y = self.norm(
+            use_running_average=deterministic)(y)
+        y = nn.swish(y)
+        y = nn.Conv(
+            features=expansion,
             kernel_size=(3, 3),
             strides=1,
-            feature_group_count=expand,
-            name="conv_depthwise")(y)
-        y = self.norm()(y)
-        y = self.act(y)
-        y = SqueezeExcite(
-            squeeze_ratio=self.squeeze_ratio,
-            name="squeeze")(y)
+            padding=1,
+            feature_group_count=expansion,
+            use_bias=False,
+            name="depthwise")(y)
+
+        if self.se_rate > 0.:
+            y = SqueezeExcitationBlock(
+                se_rate=self.se_rate)(y)
+
+        y = self.norm(
+            use_running_average=deterministic)(y)
         y = conv(
-            features=x.shape[-1],
-            kernel_size=(1, 1),
+            features=self.features,
             strides=1,
-            name="conv_reduce")(y)
-        y = self.norm()(y)
-        y = layers.DropPath(
-            rate=self.drop_path
-        )(y, deterministic=deterministic)
+            name="projection")(y)
 
-        if x.shape != y.shape:
-            x = self.norm()(x)
-            x = conv(
-                features=y.shape[-1],
-                kernel_size=(1, 1),
-                strides=self.strides,
-                name="conv_proj")(x)
-        
-        return x + y
+        if self.features == x.shape[-1]:
+            y = layers.DropPath(
+                rate=self.drop_path_rate
+            )(y, deterministic=deterministic)
+            y += x
+
+        return y
 
 
-class PositionWiseMLP(nn.Module):
-    mlp_dim: Optional[int] = None
-    dropout: float = 0.
-    kernel_init: Callable = nn.initializers.xavier_uniform()
-    bias_init: Callable = nn.initializers.normal(stddev=1e-6)
-    act: Callable = nn.gelu
-    dtype: DType = jnp.float32
+class TransformerFFN(nn.Module):
+    ffm: Module = partial(
+        nn.Conv,
+        kernel_size=(1, 1))
+    act: Module = nn.gelu
 
     @nn.compact
     def __call__(
-        self, 
-        x: jnp.ndarray, 
-        deterministic: bool = True
+        self,
+        x: jnp.ndarray,
+        **kwargs
     ) -> jnp.ndarray:
-        dense = partial(
-            nn.Dense,
-            kernel_init=self.kernel_init,
-            bias_init=self.bias_init,
-            dtype=self.dtype)
-        dropout = partial(
-            nn.Dropout,
-            rate=self.dropout)
-        
-        *_, d = x.shape
-        x = dense(features=self.mlp_dim or 4 * d)(x)
+        dim = x.shape[-1]
+        x = self.ffm(
+            features=dim * 4)(x)
         x = self.act(x)
-        x = dropout()(x, deterministic=deterministic)
-        x = dense(features=d)(x)
-        x = dropout()(x, deterministic=deterministic)
-        
+        x = self.ffm(
+            features=dim)(x)
+
         return x
 
-class CoAtNetTransformerBlock(nn.Module):
-    features: int
+
+class TransformerBlock(nn.Module):
+    features: int = 64
     strides: int = 2
-    num_heads: int = 32
-    dropout: float = 0.
-    drop_path: float = 0.
+
     norm: Module = nn.LayerNorm
-    attn: Module = nn.SelfAttention
-    mlp: Module = PositionWiseMLP
-    kernel_init: Callable = nn.initializers.xavier_uniform()
+    attn: Module = partial(
+        nn.SelfAttention,
+        num_heads=32)
+    pool: Module = partial(
+        nn.max_pool,
+        window_shape=(2, 2),
+        strides=(2, 2))
+    proj: Module = partial(
+        nn.Conv,
+        kernel_size=(1, 1)
+    )
+    ffn: Module = TransformerFFN
+
+    @nn.compact
+    def __call__(
+        self,
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
+        h = x.shape[1]
+        y = x
+
+
+        y = self.norm()(y)
+        y = self.pool()(y) if self.strides == 2 else y
+        y = einops.rearrange(
+            y, "n h w c -> n (h w) c")
+        y = self.attn(
+            out_features=self.features)(y)
+        y = einops.rearrange(
+            y, "n (h w) c -> n h w c", h=h)
+
+        x = self.pool()(x) if self.strides == 2 else x
+        x = self.proj(
+            features=self.features)(x)
+        
+        x += y
+
+        x = self.ffn()(x)
+
+        return x
+
+
+class CoAtNet(nn.Module):
+    num_classes: int = 10
+    c_block: Module = partial(
+        MBConvBlock,
+        se_rate=0.)
+    t_block: Module = partial(
+        TransformerBlock)
     dtype: DType = jnp.float32
 
     @nn.compact
     def __call__(
-        self, 
-        x: jnp.ndarray, 
+        self,
+        x: jnp.ndarray,
         deterministic: bool = True,
         **kwargs
     ) -> jnp.ndarray:
-        norm = partial(
-            self.norm,
-            dtype=self.dtype)
-        attn = partial(
-            self.attn,
-            num_heads=self.num_heads,
-            dtype=self.dtype,
-            dropout_rate=self.dropout,
-            deterministic=deterministic,
-            kernel_init=self.kernel_init)
-        drop_path = partial(
-            layers.DropPath,
-            rate=self.dropout)
-        mlp = partial(
-            self.mlp,
-            mlp_dim=self.features,
-            dropout=self.dropout,
-            dtype=self.dtype)
-        pool = partial(
-            nn.max_pool,
-            window_shape=(3, 3),
-            strides=(2, 2),
-            padding="SAME")
-        flatten = partial(
-            einops.rearrange,
-            pattern="n h w c -> n (h w) c")
-
-        y = norm()(x)
-        if self.strides != 1:
-            y = pool(y)
-            y = flatten(y)
-
-            x = pool(x)
-            x = flatten(x)
-
-        y = attn()(y, deterministic=deterministic)
-        y = drop_path()(y, deterministic=deterministic)
-        x = x + y
-        y = norm()(x)
-        y = mlp()(y, deterministic=deterministic)
-        y = drop_path()(y, deterministic=deterministic)
-
-        return x + y
-
-
-class CoAtNet(nn.Module):
-    num_classes: int
-    layers: Tuple[int] = (2, 2, 3, 5, 2)
-    features: Tuple[int] = (64, 96, 192, 384, 768)
-    head_bias: float = 0.
-
-    @nn.compact
-    def __call__(
-        self,
-        x: jnp.ndarray,
-        deterministic: bool = True
-    ) -> jnp.ndarray:
-        for i, (l, f) in enumerate(zip(self.layers, self.features)):
-            if i < 3:
-                if i == 0:
-                    block = CoAtNetStemBlock
-                else:
-                    block = CoAtNetConvBlock
-                
-                for j in range(l):
-                    strides = 1 if j else 2
-                    x = block(
-                        features=f,
-                        strides=strides,
-                        name=f"s{i}_l{j}"
-                    )(x, deterministic=deterministic)
-            else:
-                for j in range(l):
-                    strides = 1 if j else 2
-                    x = CoAtNetTransformerBlock(
-                        features=f,
-                        strides=strides,
-                        name=f"s{i}_l{j}"
-                    )(x, deterministic=deterministic)
-                if i < len(self.layers) - 1:
-                    x = einops.rearrange(
-                        x, 
-                        "n (h w) d -> n h w d",
-                        h=int(math.sqrt(x.shape[-2])),
-                        w=int(math.sqrt(x.shape[-2])))                
-
-
-        """
-        for i in range(self.num_s0):
-            strides = 1 if i else 2
-            x = CoAtNetStemBlock(
-                features=self.dim_s0,
-                strides=strides,
-                name=f"s0_l{i}"
-            )(x, deterministic=deterministic)
-        for i in range(self.num_s1):
-            strides = 1 if i else 2
-            x = CoAtNetConvBlock(
-                features=self.dim_s1,
-                strides=strides,
-                name=f"s1_l{i}"
-            )(x, deterministic=deterministic)
-        for i in range(self.num_s2):
-            strides = 1 if i else 2
-            x = CoAtNetConvBlock(
-                features=self.dim_s2,
-                strides=strides,
-                name=f"s2_l{i}"
-            )(x, deterministic=deterministic)
-        print(x.shape)
-        for i in range(self.num_s3):
-            strides = 1 if i else 2
-            x = CoAtNetTransformerBlock(
-                features=self.dim_s3,
-                strides=strides,
-                name=f"s3_l{i}"
-            )(x, deterministic=deterministic)
-        print(x.shape)
-        x = einops.rearrange(
-            x, 
-            "n (h w) d -> n h w d",
-            h=int(math.sqrt(x.shape[-2])),
-            w=int(math.sqrt(x.shape[-2])))
-        print(x.shape)
-        for i in range(self.num_s4):
-            strides = 1 if i else 2
-            x = CoAtNetTransformerBlock(
-                features=self.dim_s4,
-                strides=strides,
-                name=f"s4_l{i}"
-            )(x, deterministic=deterministic)
-        """
-
-        x = einops.reduce(
-            x, "n l d -> n d", "mean")
-        x = nn.Dense(
-            features=self.num_classes,
-            kernel_init=nn.initializers.zeros,
-            bias_init=nn.initializers.constant(
-                self.head_bias
-            ), name="head")(x)
-
-        return x
-
-
-"""
-class CoAtNet(nn.Module):
-    num_classes: int
-    num_stages: Tuple[int] = (1, 1, 1, 1, 1)
-    strides: int = 2
-    hidden_dims: Tuple[int] = (64, 96, 192, 384, 768)
-    dropout: float = 0.
-    drop_path: float = 0.
-    num_heads: int = 32
-    head_bias: float = 0.
-
-    @nn.compact
-    def __call__(
-        self,
-        x: jnp.ndarray,
-        deterministic: bool = False,
-        **kwargs
-    ) -> jnp.ndarray:
-        _, height, width, _ = x.shape
-
-        for i, (l, h) in enumerate(
-            zip(self.num_stages, self.hidden_dims)):
-            print(l, h)
-            for j in range(l):
-                s = 1 if j else self.strides
-                print(i, j, h, s)
-                
-                if i == 0:
-                    print("stem")
-                    x = CoAtNetStemBlock(
-                        features=h,
-                        strides=s,
-                        name=f"S{i}_L{j}"
-                    )(x, deterministic=deterministic)
-                elif i in (1, 2):
-                    print("conv")
-                    x = CoAtNetConvBlock(
-                        features=h,
-                        strides=s,
-                        drop_path=self.drop_path,
-                        name=f"S{i}_L{j}"
-                    )(x, deterministic=deterministic)
-                elif i in (3, 4):
-                    print("trans")
-                    if i > 3 and j == 0:
-                        downscale = 2**i
-                        x = einops.rearrange(
-                            x, 
-                            "n (h w) d -> n h w d",
-                            h=height // downscale,
-                            w=width // downscale)
-                    x = CoAtNetTransformerBlock(
-                        features=h,
-                        strides=s,
-                        num_heads=self.num_heads,
-                        dropout=self.dropout,
-                        drop_path=self.drop_path,
-                        name=f"S{i}_L{j}"
-                    )(x, deterministic=deterministic)
-
-        x = einops.reduce(
-            x, "n l d -> n d", "mean")  
-        x = nn.Dense(
-            features=self.num_classes,
-            kernel_init=nn.initializers.zeros,
-            bias_init=nn.initializers.constant(
-                self.head_bias
-            ), name="head")(x)
+        # s0
+        for i in range(2):
+            strides = (2, 2) if i == 0 else (1, 1)
+            x = MBConvBlock(
+                features=64,
+                strides=strides)(x)
         
-        return x
-"""
+        # s1
+        for i in range(2):
+            strides = (2, 2) if i == 0 else (1, 1)
+            x = self.c_block(
+                features=96,
+                strides=strides)(x)
 
-"""
-    num_classes: int
-    num_stages: Tuple[int] = (1, 1, 1, 1, 1)
-    strides: int = 2
-    hidden_dims: Tuple[int] = (64, 96, 192, 384, 768)
-    dropout: float = 0.
-    drop_path: float = 0.
-    num_heads: int = 4
-    head_bias: float = 0.
-"""
-"""
-# paper: 25 m
-# 2.360.910
-# 2.333.870
-CoAtNet0 = partial(
-    CoAtNet,
-    num_stages=(2, 2, 3, 5, 2),
-    hidden_dims=(64, 96, 192, 384, 768),
-    num_heads=32
-)
-# paper: 42 m
-# 4.394.862
-# 4.394.862
-# 4.057.454
-CoAtNet1 = partial(
-    CoAtNet,
-    num_stages=(2, 2, 6, 14, 2),
-    hidden_dims=(64, 96, 192, 384, 768)
-)
-"""
+        # s2
+        for i in range(3):
+            strides = (2, 2) if i == 0 else (1, 1)
+            x = self.c_block(
+                features=192,
+                strides=strides)(x)
+
+        # s3
+        for i in range(5):
+            strides = (2, 2) if i == 0 else (1, 1)
+            x = self.t_block(
+                features=384,
+                strides=strides)(x)
+
+        # s4
+        for i in range(2):
+            strides = (2, 2) if i == 0 else (1, 1)
+            x = self.t_block(
+                features=768,
+                strides=strides)(x)
+
+        x = einops.reduce(
+            x, "n h w c -> n c", "mean")
+        x = nn.Dense(
+            self.num_classes,
+            dtype=self.dtype)(x)
+
+        return x
+
+
+if __name__ == "__main__":
+    num_classes = 1000
+    dims = (224, 224, 3)
+    rng = jax.random.PRNGKey(42)
+
+    model = CoAtNet(
+        num_classes=num_classes)
+    variables = model.init(rng, jnp.ones([1, *dims]))
+    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
+    print(num)
