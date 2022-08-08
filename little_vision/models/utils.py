@@ -14,3 +14,7 @@ def tree_equal(a: Any, b: Any) -> bool:
             for i, j in zip(a_values, b_values)
         ])
     )
+
+
+def count_params(v: Any) -> int:
+    return sum(p.size for p in jax.tree_util.tree_leaves(v["params"]))
