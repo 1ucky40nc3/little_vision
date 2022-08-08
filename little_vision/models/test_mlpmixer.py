@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 
 from little_vision.models import mlpmixer
+from little_vision.models import utils
 
 
 def test_mixingmlp(
@@ -69,12 +70,10 @@ def test_mlpmixer_size(
     model = mlpmixer.MLPMixerS(
         num_classes=num_classes)
     variables = model.init(rng, jnp.ones([1, *dims]))
-    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
-    assert num > 18_000_000
+    assert utils.count_params(variables) > 18_000_000
 
     # mixer B/16
     model = mlpmixer.MLPMixerB(
         num_classes=num_classes)
     variables = model.init(rng, jnp.ones([1, *dims]))
-    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
-    assert num > 59_000_000
+    assert utils.count_params(variables) > 59_000_000

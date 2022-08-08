@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 
 from little_vision.models import vit
+from little_vision.models import utils
 
 
 def test_embedding(
@@ -106,11 +107,9 @@ def test_vit_size(
     model = vit.ViTSmall(
         num_classes=num_classes)
     variables = model.init(rng, jnp.ones([1, *dims]))
-    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
-    assert num > 25_000_000
+    assert utils.count_params(variables) > 25_000_000
 
     model = vit.ViTBase(
         num_classes=num_classes)
     variables = model.init(rng, jnp.ones([1, *dims]))
-    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
-    assert num > 85_000_000
+    assert utils.count_params(variables) > 85_000_000

@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import flax.linen as nn
 
 from little_vision.models import resnet
+from little_vision.models import utils
 
 
 def test_resnetblock(
@@ -87,17 +88,14 @@ def test_resnet_sizes(
     model = resnet.ResNet18(
         num_classes=num_classes)
     variables = model.init(rng, jnp.ones([1, *dims]))
-    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
-    assert num > 11_000_000
+    assert utils.count_params(variables) > 11_000_000
 
     model = resnet.ResNet34(
         num_classes=num_classes)
     variables = model.init(rng, jnp.ones([1, *dims]))
-    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
-    assert num > 21_000_000
+    assert utils.count_params(variables) > 21_000_000
 
     model = resnet.ResNet50(
         num_classes=num_classes)
     variables = model.init(rng, jnp.ones([1, *dims]))
-    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
-    assert num > 25_000_000
+    assert utils.count_params(variables) > 25_000_000
