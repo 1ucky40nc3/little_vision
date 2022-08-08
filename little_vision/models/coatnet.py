@@ -112,7 +112,7 @@ class MBConvBlock(nn.Module):
             strides=1,
             name="projection")(y)
 
-        if self.features == x.shape[-1]:
+        if self.features == x.shape[-1] and self.strides == 1:
             y = layers.DropPath(
                 rate=self.drop_path_rate
             )(y, deterministic=deterministic)
@@ -170,7 +170,6 @@ class TransformerBlock(nn.Module):
         h = x.shape[1]
         y = x
 
-
         y = self.norm()(y)
         y = self.pool()(y) if self.strides == 2 else y
         y = einops.rearrange(
@@ -193,12 +192,28 @@ class TransformerBlock(nn.Module):
 
 class CoAtNet(nn.Module):
     num_classes: int = 10
-    c_block: Module = partial(
+    layers: Tuple[int] = (2, 2, 3, 5, 2)
+    features: Tuple[int] = (64, 96, 192, 384, 768)
+    layout: Tuple[str] = ("S", "C", "C", "T", "T")
+    stem: Module = partial(
         MBConvBlock,
         se_rate=0.)
-    t_block: Module = partial(
+    conv: Module = partial(
+        MBConvBlock,
+        se_rate=0.)
+    trans: Module = partial(
         TransformerBlock)
     dtype: DType = jnp.float32
+
+    def get_layer(
+        self,
+        name: str
+    ) -> Module:
+        return {
+            "S": self.stem,
+            "C": self.conv,
+            "T": self.trans
+        }[name]
 
     @nn.compact
     def __call__(
@@ -207,40 +222,16 @@ class CoAtNet(nn.Module):
         deterministic: bool = True,
         **kwargs
     ) -> jnp.ndarray:
-        # s0
-        for i in range(2):
-            strides = (2, 2) if i == 0 else (1, 1)
-            x = MBConvBlock(
-                features=64,
-                strides=strides)(x)
-        
-        # s1
-        for i in range(2):
-            strides = (2, 2) if i == 0 else (1, 1)
-            x = self.c_block(
-                features=96,
-                strides=strides)(x)
+        assert len(self.layers) == len(self.features) == len(self.layout) == 5
 
-        # s2
-        for i in range(3):
-            strides = (2, 2) if i == 0 else (1, 1)
-            x = self.c_block(
-                features=192,
-                strides=strides)(x)
-
-        # s3
-        for i in range(5):
-            strides = (2, 2) if i == 0 else (1, 1)
-            x = self.t_block(
-                features=384,
-                strides=strides)(x)
-
-        # s4
-        for i in range(2):
-            strides = (2, 2) if i == 0 else (1, 1)
-            x = self.t_block(
-                features=768,
-                strides=strides)(x)
+        for i, (n, f, l) in enumerate(
+            zip(self.layers, self.features, self.layout)):
+            for j in range(n):
+                strides = (2, 2) if j == 0 else (1, 1)
+                x = self.get_layer(l)(
+                    features=f,
+                    strides=strides,
+                    name=f"{l}{i}-{j}")(x)
 
         x = einops.reduce(
             x, "n h w c -> n c", "mean")
@@ -251,12 +242,35 @@ class CoAtNet(nn.Module):
         return x
 
 
+CoAtNet0 = CoAtNet
+
+CoAtNet1 = partial(
+    CoAtNet,
+    layers=(2, 2, 6, 14, 2))
+
+CoAtNet2 = partial(
+    CoAtNet,
+    layers=(2, 2, 6, 14, 2),
+    features=(128, 128, 256, 512, 1024))
+
+
 if __name__ == "__main__":
     num_classes = 1000
     dims = (224, 224, 3)
     rng = jax.random.PRNGKey(42)
 
     model = CoAtNet(
+        num_classes=num_classes)
+    variables = model.init(rng, jnp.ones([1, *dims]))
+    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
+    print(num)
+
+    model = CoAtNet1(
+        num_classes=num_classes)
+    variables = model.init(rng, jnp.ones([1, *dims]))
+    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
+    print(num)
+    model = CoAtNet2(
         num_classes=num_classes)
     variables = model.init(rng, jnp.ones([1, *dims]))
     num = sum(p.size for p in jax.tree_leaves(variables["params"]))
