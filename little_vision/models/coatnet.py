@@ -1,6 +1,7 @@
 from typing import Any
 from typing import Tuple
 from typing import Union
+from typing import Optional
 from typing import Callable
 
 from functools import partial
@@ -21,6 +22,29 @@ from little_vision.models import layers
 
 DType = Any
 Module = Union[partial, nn.Module]
+
+
+class ConvStem(nn.Module):
+    features: int = 64
+    kernel_size: Tuple[int] = (3, 3)
+    strides: Optional[int] = None
+    
+    @nn.compact
+    def __call__(
+        self, 
+        x: jnp.ndarray,
+        **kwargs
+    ) -> jnp.ndarray:
+        conv = partial(
+            nn.Conv,
+            features=self.features,
+            kernel_size=self.kernel_size,
+            padding=1)
+
+        x = conv(strides=2)(x)
+        x = conv(strides=1)(x)
+
+        return x
 
 
 def global_avg_pool(
@@ -145,7 +169,7 @@ class TransformerFFN(nn.Module):
 
 class TransformerBlock(nn.Module):
     features: int = 64
-    strides: int = 2
+    strides: int = 1
 
     norm: Module = nn.LayerNorm
     attn: Module = partial(
@@ -167,11 +191,10 @@ class TransformerBlock(nn.Module):
         x: jnp.ndarray,
         **kwargs
     ) -> jnp.ndarray:
-        h = x.shape[1]
-        y = x
+        h = x.shape[1] // 2 if self.strides == 2 else x.shape[1]
 
-        y = self.norm()(y)
-        y = self.pool()(y) if self.strides == 2 else y
+        y = self.norm()(x)
+        y = self.pool(y) if self.strides == 2 else y
         y = einops.rearrange(
             y, "n h w c -> n (h w) c")
         y = self.attn(
@@ -179,7 +202,7 @@ class TransformerBlock(nn.Module):
         y = einops.rearrange(
             y, "n (h w) c -> n h w c", h=h)
 
-        x = self.pool()(x) if self.strides == 2 else x
+        x = self.pool(x) if self.strides == 2 else x
         x = self.proj(
             features=self.features)(x)
         
@@ -195,14 +218,9 @@ class CoAtNet(nn.Module):
     layers: Tuple[int] = (2, 2, 3, 5, 2)
     features: Tuple[int] = (64, 96, 192, 384, 768)
     layout: Tuple[str] = ("S", "C", "C", "T", "T")
-    stem: Module = partial(
-        MBConvBlock,
-        se_rate=0.)
-    conv: Module = partial(
-        MBConvBlock,
-        se_rate=0.)
-    trans: Module = partial(
-        TransformerBlock)
+    stem: Module = ConvStem
+    conv: Module = MBConvBlock
+    trans: Module = TransformerBlock
     dtype: DType = jnp.float32
 
     def get_layer(
@@ -252,26 +270,3 @@ CoAtNet2 = partial(
     CoAtNet,
     layers=(2, 2, 6, 14, 2),
     features=(128, 128, 256, 512, 1024))
-
-
-if __name__ == "__main__":
-    num_classes = 1000
-    dims = (224, 224, 3)
-    rng = jax.random.PRNGKey(42)
-
-    model = CoAtNet(
-        num_classes=num_classes)
-    variables = model.init(rng, jnp.ones([1, *dims]))
-    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
-    print(num)
-
-    model = CoAtNet1(
-        num_classes=num_classes)
-    variables = model.init(rng, jnp.ones([1, *dims]))
-    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
-    print(num)
-    model = CoAtNet2(
-        num_classes=num_classes)
-    variables = model.init(rng, jnp.ones([1, *dims]))
-    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
-    print(num)
