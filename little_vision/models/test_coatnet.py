@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 
 from little_vision.models import coatnet
+from little_vision.models import utils
 
 
 def test_coatnetstemblock(
@@ -12,7 +13,7 @@ def test_coatnetstemblock(
 ) -> None:
     rng = jax.random.PRNGKey(42)
 
-    model = coatnet.CoAtNetStemBlock(
+    model = coatnet.ConvStem(
         features=features)
     variables = model.init(rng, jnp.ones([1, *dims]))
     assert "params" in variables
@@ -28,7 +29,7 @@ def test_squeezeexcite(
 ) -> None:
     rng = jax.random.PRNGKey(42)
 
-    model = coatnet.SqueezeExcite()
+    model = coatnet.SqueezeExcitationBlock()
     variables = model.init(rng, jnp.ones([1, *dims]))
     assert "params" in variables
 
@@ -38,14 +39,25 @@ def test_squeezeexcite(
     assert out.shape == (10, *dims)
 
 
-def test_coatnetconvblock(
+def test_mbconvblock(
     features: int = 64,
     dims: Tuple[int] = (28, 28, 64)
 ) -> None:
     rng = jax.random.PRNGKey(42)
 
-    model = coatnet.CoAtNetConvBlock(
+    model = coatnet.MBConvBlock(
         features=features)
+    variables = model.init(rng, jnp.ones([1, *dims]))
+    assert "params" in variables
+
+    out = model.apply(
+        variables, 
+        jnp.ones([10, *dims]))
+    assert out.shape == (10, 28, 28, features)
+
+    model = coatnet.MBConvBlock(
+        features=features,
+        strides=2)
     variables = model.init(rng, jnp.ones([1, *dims]))
     assert "params" in variables
 
@@ -55,14 +67,14 @@ def test_coatnetconvblock(
     assert out.shape == (10, 28//2, 28//2, features)
 
 
-def test_mlp(
+def test_ffn(
     l: int = 32,
     d: int = 64,
     mlp_dim: int = 128,
 ) -> None:
     rng = jax.random.PRNGKey(42)
 
-    model = coatnet.PositionWiseMLP()
+    model = coatnet.TransformerFFN()
     variables = model.init(rng, jnp.ones([1, l, d]))
     assert "params" in variables
 
@@ -72,14 +84,14 @@ def test_mlp(
     assert out.shape == (10, l, d)
 
 
-def test_coatnettransformerblock(
+def test_transformerblock(
     l: int = 32,
     d: int = 64,
     dims: Tuple[int] = (16, 16, 64)
 ) -> None:
     rng = jax.random.PRNGKey(42)
 
-    model = coatnet.CoAtNetTransformerBlock(
+    model = coatnet.TransformerBlock(
         features=d)
     variables = model.init(rng, jnp.ones([1, *dims]))
     assert "params" in variables
@@ -87,18 +99,18 @@ def test_coatnettransformerblock(
     out = model.apply(
         variables, 
         jnp.ones([10, *dims]))
-    assert out.shape == (10, d, d)
+    assert out.shape == (10, *dims)
 
-    model = coatnet.CoAtNetTransformerBlock(
+    model = coatnet.TransformerBlock(
         features=d,
-        strides=1)
-    variables = model.init(rng, jnp.ones([1, l, d]))
+        strides=2)
+    variables = model.init(rng, jnp.ones([1, *dims]))
     assert "params" in variables
 
     out = model.apply(
         variables, 
-        jnp.ones([10, l, d]))
-    assert out.shape == (10, l, d)
+        jnp.ones([10, *dims]))
+    assert out.shape == (10, 8, 8, 64)
 
 
 def test_coatnet(
@@ -127,7 +139,14 @@ def test_coatnet_size(
     model = coatnet.CoAtNet(
         num_classes=num_classes)
     variables = model.init(rng, jnp.ones([1, *dims]))
-    num = sum(p.size for p in jax.tree_leaves(variables["params"]))
-    print(num)
+    assert utils.count_params(variables) > 24_000_000
 
-    assert False
+    model = coatnet.CoAtNet1(
+        num_classes=num_classes)
+    variables = model.init(rng, jnp.ones([1, *dims]))
+    assert utils.count_params(variables) > 41_000_000
+
+    model = coatnet.CoAtNet2(
+        num_classes=num_classes)
+    variables = model.init(rng, jnp.ones([1, *dims]))
+    assert utils.count_params(variables) > 74_000_000
