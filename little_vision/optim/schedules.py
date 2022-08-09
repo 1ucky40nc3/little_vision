@@ -4,7 +4,8 @@ import optax
 def linear(
     base_lr: float,
     min_lr: float,
-    num_steps: float
+    num_steps: float,
+    **kwargs
 ) -> optax.Schedule:
     return optax.linear_schedule(
         init_value=base_lr,
@@ -17,7 +18,8 @@ def warmup_linear(
     base_lr: float,
     min_lr: float,
     warmup_steps: int,
-    decay_steps: int
+    decay_steps: int,
+    **kwargs
 ) -> optax.Schedule:
     warmup_fn = optax.linear_schedule(
         init_value=0.,
@@ -37,7 +39,8 @@ def warmup_linear(
 def warmup_cosine(
     base_lr: float, 
     warmup_steps: int, 
-    decay_steps: int
+    decay_steps: int,
+    **kwargs
 ) -> optax.Schedule:
     return optax.warmup_cosine_decay_schedule(
         init_value=0.,
