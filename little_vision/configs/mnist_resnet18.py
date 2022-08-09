@@ -1,19 +1,19 @@
 import ml_collections as mlc
 
-from configs import models
-from configs import datasets
+from little_vision.configs import models
+from little_vision.configs import datasets
 
-from configs.utils import set
+from little_vision.configs import utils
 
 
 def get_config() -> mlc.FrozenConfigDict:
-    """Basic config for the CIFAR-100 example."""
+    """Config for the ResNet18 example."""
     config = mlc.ConfigDict()
 
     config.project = "little_vision"
-    config.name = "CIFAR-100 example"
+    config.name = "MNIST example"
     config.tags = ("computer-vision", "classification")
-    config.notes = "Train a classifier on the CIFAR-100 dataset."
+    config.notes = "Train a ResNet18 classifier on the MNIST dataset."
     config.do_train = True
 
     config.resume = ""
@@ -29,7 +29,9 @@ def get_config() -> mlc.FrozenConfigDict:
     config.num_epochs = 10
     config.num_steps = None
     config.epoch_steps = config.dataset.train_size // config.dataset.batch_size
-    config.max_train_steps = set(config.num_steps, config.num_epochs * config.epoch_steps)
+    config.max_train_steps = utils.set(
+        config.num_steps, 
+        config.num_epochs * config.epoch_steps)
     config.warmup_steps = 0
     config.decay_steps = config.max_train_steps - config.warmup_steps
     config.max_valid_steps = config.dataset.valid_size // config.dataset.batch_size
