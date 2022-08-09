@@ -17,7 +17,7 @@ python3 train.py
 ```
 To start a run with a different config execute:
 ```
-python3 train.py -config=/path/to/config.py
+python3 train.py --config=/path/to/config.py
 ```
 
 To resume a run:
