@@ -51,14 +51,14 @@ def prepare(
         mixup_fn = lambda t: mixup(*t)
 
         iterator = (
-             jax.tree_map(
+             jax.tree_util.tree_map(
                 mixup_fn,
                 b,
                 is_leaf=is_list)
              for b in iterator)
 
     iterator = (
-        jax.tree_map(
+        jax.tree_util.tree_map(
             lambda t: t.numpy(), b)
         for b in iterator)
 
@@ -67,12 +67,12 @@ def prepare(
         if t.ndim != 4 
         else utils.to_jax_img(t))
     iterator = (
-        jax.tree_map(
+        jax.tree_util.tree_map(
             to_jax, b) 
         for b in iterator)
 
     iterator = (
-        jax.tree_map(
+        jax.tree_util.tree_map(
             utils.shard, b) 
         for b in iterator)
     
