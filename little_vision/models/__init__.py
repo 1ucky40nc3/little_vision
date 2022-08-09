@@ -1,3 +1,9 @@
+from .cnn import *
+from .resnet import *
+from .vit import *
+from .mlpmixer import *
+from .coatnet import *
+
 """Note:
 
 Parts of this code have been taken from other authors.
