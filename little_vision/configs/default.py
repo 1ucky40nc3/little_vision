@@ -28,7 +28,7 @@ def get_config(
     config.dataset.download = True
     config.dataset.prefetch_size = 4
 
-    config.num_epochs = 10
+    config.num_epochs = 1
     config.num_steps = None
     config.epoch_steps = config.dataset.train_size // config.dataset.batch_size
     config.max_train_steps = utils.set(
