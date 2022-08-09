@@ -38,6 +38,7 @@ from little_vision.data import datasets as little_datasets
 from little_vision import models as little_models
 from little_vision.optim import optimizers as little_optimizers
 from little_vision.optim import losses as little_losses
+
 from little_vision import metrics as little_metrics
 
 
@@ -45,7 +46,7 @@ ConfigDict = Union[mlc.ConfigDict, mlc.FrozenConfigDict]
 
 
 CONFIG_FLAG = config_flags.DEFINE_config_file(
-    'config', default="configs/default.py")
+    'config', default="little_vision/configs/default.py")
 
 
 def do_logging(
@@ -144,8 +145,6 @@ def resume(
         config.save_dir,
         state
     )
-
-
 
 
 class TrainState(train_state.TrainState):
