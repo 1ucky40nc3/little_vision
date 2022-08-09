@@ -34,11 +34,11 @@ from flax.training import train_state
 
 import einops
 
-import models as little_models
-import optimizers as little_optimizers
-import losses as little_losses
-import metrics as little_metrics
-import data.datasets as little_datasets
+from little_vision.data import datasets as little_datasets
+from little_vision import models as little_models
+from little_vision.optim import optimizers as little_optimizers
+from little_vision.optim import losses as little_losses
+from little_vision import metrics as little_metrics
 
 
 ConfigDict = Union[mlc.ConfigDict, mlc.FrozenConfigDict]
