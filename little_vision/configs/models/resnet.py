@@ -17,7 +17,7 @@ def optimizer(
 ) -> mlc.ConfigDict:
     cfg = mlc.ConfigDict()
     cfg.gc_norm = None
-    cfg.tx_name = "scale_by_adam"
+    cfg.tx_name = "scale_by_sgd"
     cfg.tx_config = dict(
         momentum=0.9)
     cfg.wd = 1e-4
