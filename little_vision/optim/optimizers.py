@@ -4,7 +4,7 @@ import optax
 
 import ml_collections as mlc
 
-import schedules
+from little_vision.optim import schedules
 
 
 ConfigDict = Union[
