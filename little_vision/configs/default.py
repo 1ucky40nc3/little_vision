@@ -3,7 +3,7 @@ import ml_collections as mlc
 from little_vision.configs import models
 from little_vision.configs import datasets
 
-from little_vision.configs.utils import set
+from little_vision.configs import utils
 
 
 def get_config(
@@ -31,7 +31,9 @@ def get_config(
     config.num_epochs = 10
     config.num_steps = None
     config.epoch_steps = config.dataset.train_size // config.dataset.batch_size
-    config.max_train_steps = set(config.num_steps, config.num_epochs * config.epoch_steps)
+    config.max_train_steps = utils.set(
+        config.num_steps, 
+        config.num_epochs * config.epoch_steps)
     config.warmup_steps = 0
     config.decay_steps = config.max_train_steps - config.warmup_steps
     config.max_valid_steps = config.dataset.valid_size // config.dataset.batch_size
