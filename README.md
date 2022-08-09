@@ -15,6 +15,11 @@ To run the MNIST example with Weights and Biases logging:
 ```
 python3 train.py
 ```
+To start a run with a different config execute:
+```
+python3 train.py -config=/path/to/config.py
+```
+
 To resume a run:
 ```
 python3 train.py --config.run_id="$run_id" --config.resume="must"
