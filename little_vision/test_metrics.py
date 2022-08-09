@@ -1,3 +1,5 @@
+from typing import Any
+
 import jax
 import jax.numpy as jnp
 
@@ -73,3 +75,47 @@ def test_precision_recall_f1(
 
     metrics = little_metrics.precision_recall_f1(x, y)
     assert len(metrics) == 3
+
+
+def test_calc(
+    num_classes: int = 10,
+    devices: int = 8,
+) -> None:
+    hot = lambda a: jax.nn.one_hot(a, num_classes)
+    def assert_value(m: Any, v: float) -> None:
+        assert m["top1_acc"] == v
+        assert m["top5_acc"] == v
+        assert m["precision"] == v
+        assert m["recall"] == v
+        assert m["f1"] == v
+
+    rng = jax.random.PRNGKey(42)
+    rng, key = jax.random.split(rng)
+    x = jax.random.normal(key, (devices, 512, num_classes,))
+    y = jnp.argmax(x, axis=-1)
+    l = jnp.mean(x, axis=-1)
+
+    metrics = little_metrics.calc(
+        [l]*10, [x]*10, [y]*10)
+    assert_value(metrics, 1.)
+
+    metrics = little_metrics.calc(
+        [l]*10 + [l[:,:-10]], 
+        [x]*10 + [x[:,:-10,:]], 
+        [y]*10 + [y[:,:-10]])
+    assert_value(metrics, 1.)
+
+    y = hot(jnp.argmax(x, axis=-1))
+    metrics = little_metrics.calc(
+        [l]*10, [x]*10, [y]*10)
+    assert_value(metrics, 1.)
+    metrics = little_metrics.calc(
+        [l]*10 + [l[:,:-10]], 
+        [x]*10 + [x[:,:-10,:]], 
+        [y]*10 + [y[:,:-10]])
+    assert_value(metrics, 1.)
+
+    x = -x + 1
+    metrics = little_metrics.calc(
+        [l]*10, [x]*10, [y]*10)
+    assert_value(metrics, 0.)
