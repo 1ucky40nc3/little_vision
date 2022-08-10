@@ -48,31 +48,32 @@ def test_mbconvblock(
     model = coatnet.MBConvBlock(
         features=features)
     variables = model.init(rng, jnp.ones([1, *dims]))
-    assert "params" in variables
+    assert "params" in variables and "batch_stats" in variables
 
-    out = model.apply(
+    out, mutvars = model.apply(
         variables, 
-        jnp.ones([10, *dims]))
+        jnp.ones([10, *dims]),
+        mutable=["batch_stats"])
     assert out.shape == (10, 28, 28, features)
+    assert "batch_stats" in mutvars
 
     model = coatnet.MBConvBlock(
         features=features,
         strides=2)
     variables = model.init(rng, jnp.ones([1, *dims]))
-    assert "params" in variables
 
-    out = model.apply(
+    out, _ = model.apply(
         variables, 
-        jnp.ones([10, *dims]))
+        jnp.ones([10, *dims]),
+        mutable=["batch_stats"])
     assert out.shape == (10, 28//2, 28//2, features)
 
     out = model.apply(
         variables, 
         jnp.ones([10, *dims]),
-        deterministic=False,
-        mutable=["batch_stats"])
-    assert out[0].shape == (10, 28//2, 28//2, features)
-    assert "batch_stats" in out[1]
+        deterministic=True,
+        mutable=False)
+    assert out.shape == (10, 28//2, 28//2, features)
 
 
 def test_ffn(
@@ -130,11 +131,20 @@ def test_coatnet(
     model = coatnet.CoAtNet(
         num_classes=num_classes)
     variables = model.init(rng, jnp.ones([1, *dims]))
-    assert "params" in variables
+    assert "params" in variables and "batch_stats" in variables
+
+    out, mutvars = model.apply(
+        variables, 
+        jnp.ones([10, *dims]),
+        mutable=["batch_stats"])
+    assert out.shape == (10, 10)
+    assert "batch_stats" in mutvars
 
     out = model.apply(
         variables, 
-        jnp.ones([10, *dims]))
+        jnp.ones([10, *dims]),
+        mutable=False,
+        deterministic=True)
     assert out.shape == (10, 10)
 
 
