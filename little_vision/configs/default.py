@@ -43,6 +43,7 @@ def get_config(
     config.loss.config = dict(
         num_classes=config.dataset.num_classes)
 
+    config.model_name = "CNN"
     config.model = models.cnn.model(config)
     config.optimizer = models.cnn.optimizer(config)
     config.transform = models.cnn.preprocessing(config)
