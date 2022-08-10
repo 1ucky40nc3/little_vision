@@ -148,7 +148,7 @@ def resume(
 
 
 class TrainState(train_state.TrainState):
-    batch_stats: flax.core.frozen_dict.FrozenDict
+    batch_stats: flax.core.frozen_dict.FrozenDict[str, Any]
 
 
 @partial(jax.jit, static_argnums=(1,), backend="cpu")
@@ -159,7 +159,7 @@ def initialize(
     cls = getattr(little_models, config.model.name)
     model = cls(**config.model.config)
     images = jnp.ones([1, *config.dataset.image_dims])
-    variables = model.init(rng, images, deterministic=True)
+    variables = model.init(rng, images)
 
     tx = little_optimizers.tx(config.optimizer)
 
@@ -183,10 +183,12 @@ def eval_step(
     config: ConfigDict
 ) -> Tuple[jnp.ndarray, Tuple[jnp.ndarray]]:
     def loss_fn(params):
-        logits = state.apply_fn({
-            "params": params,
-            "batch_stats": state.batch_stats
-        }, images, deterministic=True)
+        variables = {"params": params, "batch_stats": state.batch_stats}
+        logits = state.apply_fn(
+            variables, 
+            images, 
+            mutable=False,
+            deterministic=True)
         loss = getattr(little_losses, config.loss.name)(
             logits, labels, **config.loss.config)
         return loss, logits
@@ -233,14 +235,12 @@ def train_step(
     rngs = jax.random.fold_in(rngs, state.step)
 
     def loss_fn(params):
-        logits, mutvars = state.apply_fn({
-                "params": params,
-                "batch_stats": state.batch_stats
-            }, 
+        variables = {"params": params, "batch_stats": state.batch_stats}
+        logits, mutvars = state.apply_fn(
+            variables,
             images, 
             mutable=["batch_stats"], 
-            rngs=dict(dropout=rngs),
-            deterministic=False)
+            rngs=dict(dropout=rngs))
         loss = getattr(little_losses, config.loss.name)(
             logits, labels, **config.loss.config)
         return loss, (logits, mutvars)
@@ -248,7 +248,7 @@ def train_step(
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, (logits, mutvars)), grads = grad_fn(state.params)
 
-    grads  = jax.lax.pmean(grads, axis_name="i")
+    grads = jax.lax.pmean(grads, axis_name="i")
     state = state.apply_gradients(
         grads=grads, batch_stats=mutvars["batch_stats"])
 
@@ -263,10 +263,9 @@ def train(
 
     key = jax.random.PRNGKey(config.random_seed)
     key, subkey = jax.random.split(key)
-    print("i")
 
     state = initialize(subkey, config)
-    #print(state.opt_state)
+
     if config.resume:
         state = resume(state, config)
     
@@ -277,7 +276,6 @@ def train(
     valid_ds = load_ds(train=False, config=config)
 
     keys = jax.random.split(key, jax.local_device_count())
-    print("wow")
 
     tloss, tlogits, tlabels, = [], [], []
     for step, (images, labels) in zip(
