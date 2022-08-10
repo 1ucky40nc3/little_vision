@@ -10,7 +10,7 @@ def preprocessing(
     cfg.mixup = True
     cfg.mixup_config = dict(
         mixup_alpha=0.8,
-        cutmix_aplha=0.,
+        cutmix_alpha=0.,
         cutmix_minmax=None,
         prob=1.,
         switch_prob=0.,
