@@ -46,9 +46,9 @@ class ResNetBlock(nn.Module):
             x = conv(
                 kernel_size=(1, 1),
                 strides=self.strides,
-                name="conv_proj")(y)
+                name="conv_proj")(x)
             x = norm(
-                name="norm_proj")(y)
+                name="norm_proj")(x)
 
         return act(x + y)
 

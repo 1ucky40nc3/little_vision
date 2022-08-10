@@ -42,7 +42,22 @@ def test_bottleneckresnetblock(
     block = resnet.BottleneckResNetBlock(
         features=features,
         norm=partial(
-            nn.BatchNorm, 
+            nn.BatchNorm,
+            use_running_average=False))
+    variables = block.init(rng, jnp.ones([1, *dims]))
+    assert "params" in variables and "batch_stats" in variables
+
+    out, mutvars = block.apply(
+        variables, 
+        jnp.ones([10, *dims]),
+        mutable=["batch_stats"])
+    assert out.shape == (10, *dims[:-1], features * 4)
+    assert "batch_stats" in mutvars
+
+    block = resnet.BottleneckResNetBlock(
+        features=features,
+        norm=partial(
+            nn.BatchNorm,
             use_running_average=True))
     variables = block.init(rng, jnp.ones([1, *dims]))
     assert "params" in variables and "batch_stats" in variables
@@ -50,9 +65,9 @@ def test_bottleneckresnetblock(
     out = block.apply(
         variables, 
         jnp.ones([10, *dims]),
-        mutable=["batch_stats"])
-    assert out[0].shape == (10, *dims[:-1], features * 4)
-    assert "batch_stats" in out[1]
+        mutable=False,
+        deterministic=True)
+    assert out.shape == (10, *dims[:-1], features * 4)
 
 
 def test_resnet(
@@ -62,21 +77,24 @@ def test_resnet(
     rng = jax.random.PRNGKey(42)
 
     model = resnet.ResNet(
-        features=features,
-        norm=partial(
-            nn.BatchNorm, 
-            use_running_average=True))
+        features=features)
     variables = model.init(rng, jnp.ones([1, *dims]))
     assert "params" in variables and "batch_stats" in variables
 
     sample = jnp.ones([10, *dims])
+    out, mutvars = model.apply(
+        variables, 
+        sample, 
+        mutable=["batch_stats"])
+    assert out.shape == (10, model.num_classes)
+    assert "batch_stats" in mutvars
+
     out = model.apply(
         variables, 
         sample, 
-        train=False,
-        mutable=["batch_stats"])
-    assert out[0].shape == (10, model.num_classes)
-    assert "batch_stats" in out[1]
+        mutable=False,
+        deterministic=True)
+    assert out.shape == (10, model.num_classes)
 
 
 def test_resnet_sizes(
