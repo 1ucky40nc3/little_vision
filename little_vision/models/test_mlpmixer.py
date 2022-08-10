@@ -43,6 +43,12 @@ def test_mixerblock(
         jnp.ones([10, l, d]))
     assert out.shape == (10, l, d)
 
+    out = model.apply(
+        variables, 
+        jnp.ones([10, l, d]),
+        deterministic=False)
+    assert out.shape == (10, l, d)
+
 
 def test_mlpmixer(
     features: int = 64,

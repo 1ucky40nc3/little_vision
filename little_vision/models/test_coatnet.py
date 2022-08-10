@@ -66,6 +66,14 @@ def test_mbconvblock(
         jnp.ones([10, *dims]))
     assert out.shape == (10, 28//2, 28//2, features)
 
+    out = model.apply(
+        variables, 
+        jnp.ones([10, *dims]),
+        deterministic=False,
+        mutable=["batch_stats"])
+    assert out[0].shape == (10, 28//2, 28//2, features)
+    assert "batch_stats" in out[1]
+
 
 def test_ffn(
     l: int = 32,
