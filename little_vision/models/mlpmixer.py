@@ -86,7 +86,7 @@ class MLPMixer(nn.Module):
     def __call__(
         self, 
         x: jnp.ndarray,
-        deterministic: bool = True,
+        deterministic: bool = False,
         **kwargs
     ) -> jnp.ndarray:
         patches = (self.patch_size, self.patch_size)

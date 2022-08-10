@@ -78,7 +78,7 @@ class TransformerEncoderBlock(nn.Module):
     def __call__(
         self, 
         x: jnp.ndarray, 
-        deterministic: bool = True
+        deterministic: bool = False
     ) -> jnp.ndarray:
         norm = partial(
             self.norm,
