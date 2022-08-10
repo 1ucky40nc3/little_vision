@@ -27,10 +27,11 @@ class DropPath(nn.Module):
         rng = self.make_rng('dropout')
 
         keep_prob = 1. - self.rate
+        shape = [x.shape[0]] + [1 for _ in x.ndim - 1]
         mask = jax.random.bernoulli(
             key=rng, 
             p=keep_prob, 
-            shape=(x.shape[0], 1, 1, 1))
+            shape=shape)
         mask = jnp.broadcast_to(
             mask, x.shape)
         return jax.lax.select(
