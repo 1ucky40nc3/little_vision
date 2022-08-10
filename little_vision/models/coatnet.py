@@ -23,6 +23,10 @@ from little_vision.models import layers
 DType = Any
 Module = Union[partial, nn.Module]
 
+"""CoAtNet implementation inspired by:
+https://github.com/blakechi/ComVEX/tree/master/comvex/coatnet
+"""
+
 
 class ConvStem(nn.Module):
     features: int = 64

@@ -203,6 +203,8 @@ def evaluate(
     config: ConfigDict,
     **kwargs
 ) -> None:
+    # TODO: fix eval like: https://flax.readthedocs.io/en/latest/guides/full_eval.html
+
     vloss, vlogits, vlabels = [], [], []
     for step, (images, labels) in enumerate(
         little_datasets.prepare(dataset, config)):
