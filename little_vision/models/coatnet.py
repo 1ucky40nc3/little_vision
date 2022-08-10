@@ -96,7 +96,7 @@ class MBConvBlock(nn.Module):
     def __call__(
         self,
         x: jnp.ndarray,
-        deterministic: bool = True,
+        deterministic: bool = False,
         **kwargs
     ) -> jnp.ndarray:
         expansion = x.shape[-1] * self.exp_rate
@@ -104,17 +104,18 @@ class MBConvBlock(nn.Module):
             nn.Conv,
             kernel_size=(1, 1),
             use_bias=False)
+        norm = partial(
+            self.norm,
+            use_running_average=deterministic)
         
-        y = self.norm(
-            use_running_average=deterministic)(x)
+        y = norm()(x)
         y = nn.swish(y)
         y = conv(
             features=expansion,
             strides=self.strides,
             name="expansion")(y)
 
-        y = self.norm(
-            use_running_average=deterministic)(y)
+        y = norm()(y)
         y = nn.swish(y)
         y = nn.Conv(
             features=expansion,
@@ -129,8 +130,7 @@ class MBConvBlock(nn.Module):
             y = SqueezeExcitationBlock(
                 se_rate=self.se_rate)(y)
 
-        y = self.norm(
-            use_running_average=deterministic)(y)
+        y = norm()(y)
         y = conv(
             features=self.features,
             strides=1,
@@ -158,6 +158,7 @@ class TransformerFFN(nn.Module):
         **kwargs
     ) -> jnp.ndarray:
         dim = x.shape[-1]
+
         x = self.ffm(
             features=dim * 4)(x)
         x = self.act(x)
@@ -170,7 +171,6 @@ class TransformerFFN(nn.Module):
 class TransformerBlock(nn.Module):
     features: int = 64
     strides: int = 1
-
     norm: Module = nn.LayerNorm
     attn: Module = partial(
         nn.SelfAttention,
@@ -184,6 +184,7 @@ class TransformerBlock(nn.Module):
         kernel_size=(1, 1)
     )
     ffn: Module = TransformerFFN
+    drop_path_rate: float = 0.
 
     @nn.compact
     def __call__(
@@ -208,9 +209,12 @@ class TransformerBlock(nn.Module):
         
         x += y
 
-        x = self.ffn()(x)
+        y = self.ffn()(x)
+        y = layers.DropPath(
+            rate=self.drop_path_rate
+        )(y, deterministic=deterministic)
 
-        return x
+        return x + y
 
 
 class CoAtNet(nn.Module):
@@ -237,7 +241,7 @@ class CoAtNet(nn.Module):
     def __call__(
         self,
         x: jnp.ndarray,
-        deterministic: bool = True,
+        deterministic: bool = False,
         **kwargs
     ) -> jnp.ndarray:
         assert len(self.layers) == len(self.features) == len(self.layout) == 5
@@ -249,7 +253,8 @@ class CoAtNet(nn.Module):
                 x = self.get_layer(l)(
                     features=f,
                     strides=strides,
-                    name=f"{l}{i}-{j}")(x)
+                    name=f"{l}{i}-{j}"
+                )(x, deterministic=deterministic)
 
         x = einops.reduce(
             x, "n h w c -> n c", "mean")
