@@ -372,13 +372,13 @@ class CoAtNetish(nn.Module):
         return x
 
 
-CoAtNetish0 = CoAtNet
+CoAtNetish0 = CoAtNetish
 
 CoAtNetish1 = partial(
-    CoAtNet,
+    CoAtNetish,
     layers=(2, 2, 6, 14, 2))
 
 CoAtNetish2 = partial(
-    CoAtNet,
+    CoAtNetish,
     layers=(2, 2, 6, 14, 2),
     features=(128, 128, 256, 512, 1024))
