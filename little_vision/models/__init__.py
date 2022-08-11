@@ -3,6 +3,7 @@ from .resnet import *
 from .vit import *
 from .mlpmixer import *
 from .coatnet import *
+from .coanetish import *
 
 """Note:
 
