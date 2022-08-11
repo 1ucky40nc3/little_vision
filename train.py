@@ -264,9 +264,10 @@ def train(
     pool = multiprocessing.pool.ThreadPool()
 
     key = jax.random.PRNGKey(config.random_seed)
-    key, subkey = jax.random.split(key)
+    key, pkey, dkey = jax.random.split(key, num=3)
 
-    state = initialize(subkey, config)
+    rngs = {"params": pkey, "dropout": dkey}
+    state = initialize(rngs, config)
 
     if config.resume:
         state = resume(state, config)
