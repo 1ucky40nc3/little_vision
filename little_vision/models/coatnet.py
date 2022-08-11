@@ -187,27 +187,40 @@ class TransformerBlock(nn.Module):
         nn.Conv,
         kernel_size=(1, 1)
     )
-    ffn: Module = TransformerFFN
+    ffn: Module = vit.PositionWiseMLP
     drop_path_rate: float = 0.
 
     @nn.compact
     def __call__(
         self,
         x: jnp.ndarray,
+        deterministic: bool = False,
         **kwargs
     ) -> jnp.ndarray:
         h = x.shape[1] // 2 if self.strides == 2 else x.shape[1]
 
+        def pool(
+            t: jnp.ndarray,
+            strides: Tuple[int] = (2, 1)
+        ) -> jnp.ndarray:
+            t = jnp.expand_dims(t, 1)
+            t = nn.max_pool(
+                t, window_shape=strides, strides=strides)
+            t = t[:, 0]
+            return t
+
         y = self.norm()(x)
-        y = self.pool(y) if self.strides == 2 else y
+        y = pool(y) if self.strides == 2 else y
+        """
         y = einops.rearrange(
-            y, "n h w c -> n (h w) c")
+            y, "n h w c -> n (h w) c")"""
         y = self.attn(
             out_features=self.features)(y)
+        """
         y = einops.rearrange(
-            y, "n (h w) c -> n h w c", h=h)
+            y, "n (h w) c -> n h w c", h=h)"""
 
-        x = self.pool(x) if self.strides == 2 else x
+        x = pool(x) if self.strides == 2 else x
         x = self.proj(
             features=self.features)(x)
         
@@ -252,6 +265,9 @@ class CoAtNet(nn.Module):
 
         for i, (n, f, l) in enumerate(
             zip(self.layers, self.features, self.layout)):
+            if i == 3 and l == "T":
+                x = einops.rearrange(
+                    x, "n h w c -> n (h w) c")
             for j in range(n):
                 strides = (2, 2) if j == 0 else (1, 1)
                 x = self.get_layer(l)(
@@ -261,7 +277,7 @@ class CoAtNet(nn.Module):
                 )(x, deterministic=deterministic)
 
         x = einops.reduce(
-            x, "n h w c -> n c", "mean")
+            x, "n l c -> n c", "mean")
         x = nn.Dense(
             self.num_classes,
             dtype=self.dtype)(x)
