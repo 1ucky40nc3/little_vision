@@ -38,11 +38,15 @@ ResNet models can be split into stages (s) that repeat blocks of the same size. 
 There are two different kinds of blocks. The a default (ResNetBlock) one and a version that introduces an additional bottleneck layer (BottleneckResNetBlock).
 
 Name | Structure | Parameters
+--- | --- | ---
 ResNet18 | s=(2, 2, 2, 2) | 11,689,512
 ResNet34 | s=(3, 4, 6, 3) | 21,797,672
 ResNet50 | s=(3, 4, 6, 3)* | 25,557,032
 *The ResNet50 makes use of BottleneckResNetBlock layers
 - implementation: [resnet.py](little_vision/models/resnet.py)
+- reference implementations:
+    - 
+    -
 
 ### ViT
 - status: implemented
@@ -50,6 +54,7 @@ ResNet50 | s=(3, 4, 6, 3)* | 25,557,032
 
 - models:
 Name | Structure | Parameters
+--- | --- | ---
 ResNet18 | s=(2, 2, 2, 2) | 11 M
 ResNet34 | s=(3, 4, 6, 3) | 21 M
 ResNet50 | s=(3, 4, 6, 3)* | 25 M
