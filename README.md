@@ -4,7 +4,7 @@
       <h1> little <br/> vision </h1>
     </td>
     <td style="border:none">
-      <img src="https://raw.githubusercontent.com/1ucky40nc3/little_vision/main/assets/little_vision.png" width="400"/>
+      <img src="https://raw.githubusercontent.com/1ucky40nc3/little_vision/main/assets/logo.png" width="400"/>
     </td>
   </tr>
 </table>
