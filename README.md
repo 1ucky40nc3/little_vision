@@ -1,6 +1,27 @@
 # little_vision
 experiments with deep neural networks
 
+---
+
+This repository is a learning resource for deep neural networks in a computer vision context. Specifically we are trying to solve image classification tasks. To accomplish this goal we build neural networks following popular architectures. Their training is currently restricted by my resources - with basically is [Google Colab ;)](https://research.google.com/colaboratory/faq.html). Therefore presented training examples will be restricted to small versions of each architecture and smaller image classification datasets. 
+
+If you are interested to contribute or collaborate in any way, you are very welcome. Just contact me via an issue or e-mail.
+
+
+# Content
+This repository supports the training of a number of deep neural networks on image classification datasets.
+Supported architectures are:
+- [ ] ResNet
+- [ ] ViT
+- [ ] MLP-Mixer
+- [ ] CoAtNet
+
+We train with the following datasets:
+- [ ] MNIST
+- [ ] CIFAR-10
+- [ ] CIFAR-100
+
+We construct theese networks and train them using [jax](https://github.com/google/jax) und [flax](https://github.com/google/flax). Datasets are loaded via [PyTorch](https://github.com/pytorch/pytorch), in the style of [torchvision](https://github.com/pytorch/vision). Specific image augmentations are implemented using torchvision and [timm](https://github.com/rwightman/pytorch-image-models). The evaluation is done using [scikit-learn](https://github.com/scikit-learn/scikit-learn) and reported to [wandb](https://wandb.ai/site).
 
 # Training
 Working example of training runs can be found as
