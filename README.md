@@ -1,11 +1,10 @@
 # little_vision
-experiments with deep neural networks
 
 ---
 
-This repository is a learning resource for deep neural networks in a computer vision context. Specifically we are trying to solve image classification tasks. To accomplish this goal we build neural networks following popular architectures. Their training is currently restricted by my resources - with basically is [Google Colab ;)](https://research.google.com/colaboratory/faq.html). Therefore presented training examples will be restricted to small versions of each architecture and smaller image classification datasets. 
+This repository is a learning resource for deep neural networks in a computer vision context. Specifically, we are trying to solve image classification tasks. We build neural networks following popular architectures and train with openly available datasets. 
 
-If you are interested to contribute or collaborate in any way, you are very welcome. Just contact me via an issue or e-mail.
+Because of current resource restrictions experiments make use of small models and little data. Maybe we can change this in the future... If you are interested in contributing or collaborating in any way, you are welcome. Just contact me by creating an issue or e-mail.
 
 
 # Content
