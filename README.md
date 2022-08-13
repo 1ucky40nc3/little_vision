@@ -29,13 +29,39 @@ We train with the following datasets:
 
 We construct theese networks and train them using [jax](https://github.com/google/jax) und [flax](https://github.com/google/flax). Datasets are loaded via [PyTorch](https://github.com/pytorch/pytorch), in the style of [torchvision](https://github.com/pytorch/vision). Specific image augmentations are implemented using torchvision and [timm](https://github.com/rwightman/pytorch-image-models). The evaluation is done using [scikit-learn](https://github.com/scikit-learn/scikit-learn) and reported to [wandb](https://wandb.ai/site).
 
+## Models
+### ResNet
+- status: implemented
+- paper: K. He, X. Zhang, S. Ren, and J. Sun, “Deep Residual Learning for Image Recognition,” arXiv:1512.03385 [cs], Dec. 2015, Accessed: May 10, 2022. [Online]. Available: http://arxiv.org/abs/1512.03385
+- models:
+ResNet models can be split into stages (s) that repeat blocks of the same size. At the start of each but the first layer a stride of 2 is applied. A ResNet block combines convolution layers and uses ReLU activations and BatchNorm normalization.
+There are two different kinds of blocks. The a default (ResNetBlock) one and a version that introduces an additional bottleneck layer (BottleneckResNetBlock).
+
+Name | Structure | Parameters
+ResNet18 | s=(2, 2, 2, 2) | 11,689,512
+ResNet34 | s=(3, 4, 6, 3) | 21,797,672
+ResNet50 | s=(3, 4, 6, 3)* | 25,557,032
+*The ResNet50 makes use of BottleneckResNetBlock layers
+- implementation: [resnet.py](little_vision/models/resnet.py)
+
+### ViT
+- status: implemented
+- paper: A. Dosovitskiy u. a., „An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale“, arXiv:2010.11929 [cs], Juni 2021, Zugegriffen: 10. Mai 2022. [Online]. Verfügbar unter: http://arxiv.org/abs/2010.11929
+
+- models:
+Name | Structure | Parameters
+ResNet18 | s=(2, 2, 2, 2) | 11 M
+ResNet34 | s=(3, 4, 6, 3) | 21 M
+ResNet50 | s=(3, 4, 6, 3)* | 25 M
+### MLP-Mixer
+### CoAtNet
+
+
+
 # Training
 Working example of training runs can be found as
 iPython notebooks that may be run in Google Colaboratory.
 
-# Warning!
-Training  using the ```train.py``` script is sadly not working.
-To fix this crisis traing notebooks (as described above) were implemented.
 
 # Example of how it should have been: 
 To run the MNIST example with Weights and Biases logging:
