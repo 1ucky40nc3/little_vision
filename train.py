@@ -110,7 +110,8 @@ def log(
     data: Dict[str, Any], 
     desc: str, 
     prefix: str, 
-    only_std: bool = False
+    only_std: bool = False,
+    **kwargs
 ) -> None:
     data_str = [f"{k}: {v:.5f}" for k, v in data.items()]
     data_str =  "; ".join((f"step: {step:7d}", *data_str))
@@ -294,13 +295,13 @@ def train(
 
         if do_logging(step, config):
             data = little_metrics.calc(tloss, tlogits, tlabels)
-            log(step, data, "Train | ", "train_")
+            log(step, data, "Train | ", "train_", **config.logging)
             tloss, tlogits, tlabels = [], [], []
 
         if do_eval(step, config):
             vmetrics = evaluate(state, valid_ds, config)
             data = little_metrics.calc(*vmetrics)
-            log(step, data, "Valid | ", "valid_")
+            log(step, data, "Valid | ", "valid_", **config.logging)
 
         if do_save(step, config):
             pool.apply_async(save, (state, config))
@@ -316,14 +317,15 @@ def main(_):
     os.makedirs(config.log_dir, exist_ok=True)
     os.makedirs(config.save_dir, exist_ok=True)
 
-    wandb.init(
-        dir=config.log_dir,
-        project=config.project,
-        tags=config.tags,
-        notes=config.notes,
-        id=config.run_id or None,
-        resume=config.resume or None,
-        config=config.as_configdict().to_dict())
+    if not config.logging.only_std:
+        wandb.init(
+            dir=config.log_dir,
+            project=config.project,
+            tags=config.tags,
+            notes=config.notes,
+            id=config.run_id or None,
+            resume=config.resume or None,
+            config=config.as_configdict().to_dict())
     
     train(config)
 

@@ -62,4 +62,7 @@ def get_config(
     config.save_dir = "./checkpoints"
     config.keep_num_saves = 3
 
+    config.logging = mlc.ConfigDict()
+    config.logging.only_std = False
+
     return config
