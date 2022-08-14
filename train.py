@@ -149,7 +149,8 @@ def resume(
 
 
 class TrainState(train_state.TrainState):
-    batch_stats: flax.core.frozen_dict.FrozenDict[str, Any]
+    batch_stats: Optional[flax.core.frozen_dict.FrozenDict[str, Any]] = None
+    relative_position_index: Optional[flax.core.frozen_dict.FrozenDict[str, Any]] = None
 
 
 @partial(jax.jit, static_argnums=(1,), backend="cpu")
@@ -162,13 +163,16 @@ def initialize(
     images = jnp.ones([1, *config.dataset.image_dims])
     variables = model.init(rng, images)
 
+    print(variables)
+
     tx = little_optimizers.tx(config.optimizer)
 
     return TrainState.create(
         tx=tx,
         apply_fn=model.apply, 
         params=variables.get("params"),
-        batch_stats=variables.get("batch_stats") or dict()
+        batch_stats=variables.get("batch_stats") or dict(),
+        relative_position_index=variables.get("relative_position_index") or dict()
     )
 
 
@@ -184,7 +188,11 @@ def eval_step(
     config: ConfigDict
 ) -> Tuple[jnp.ndarray, Tuple[jnp.ndarray]]:
     def loss_fn(params):
-        variables = {"params": params, "batch_stats": state.batch_stats}
+        variables = {
+            "params": params, 
+            "batch_stats": state.batch_stats,
+            "relative_position_index": state.relative_position_index
+        }
         logits = state.apply_fn(
             variables, 
             images, 
@@ -237,12 +245,20 @@ def train_step(
 ) -> Tuple[jnp.ndarray, Tuple[jnp.ndarray]]:
     rngs = jax.random.fold_in(rngs, state.step)
 
+    print("rel_index")
+    print(state.relative_position_index)
+
     def loss_fn(params):
-        variables = {"params": params, "batch_stats": state.batch_stats}
+        variables = {
+            "params": params, 
+            "batch_stats": state.batch_stats,
+            "relative_position_index": state.relative_position_index
+        }
+        mutable = ["batch_stats", "relative_position_index"]
         logits, mutvars = state.apply_fn(
             variables,
             images, 
-            mutable=["batch_stats"], 
+            mutable=mutable, 
             rngs=dict(dropout=rngs))
         loss = getattr(little_losses, config.loss.name)(
             logits, labels, **config.loss.config)
@@ -253,7 +269,9 @@ def train_step(
 
     grads = jax.lax.pmean(grads, axis_name="i")
     state = state.apply_gradients(
-        grads=grads, batch_stats=mutvars["batch_stats"])
+        grads=grads, 
+        batch_stats=mutvars["batch_stats"],
+        relative_position_index=mutvars["relative_position_index"])
 
     return state, (loss, logits)
 
